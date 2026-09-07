@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // sessionResultStatus classifies what `ao session result` found in the
