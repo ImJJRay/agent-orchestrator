@@ -105,13 +105,61 @@ func TestDeriveSessionResult_RunningTurnIsNotReady(t *testing.T) {
 	}
 }
 
+// TestDeriveSessionResult_NoTurnsYetIsRunning covers the live/not-terminal
+// controller states: a session with no active turn can still start one, so
+// each must report running rather than a fabricated failure. The empty string
+// is included deliberately -- it is what a bare snapshot reports when the
+// daemon has never set a controller field at all, and preserving that as
+// running keeps the CLI's original compatibility behavior rather than newly
+// failing it.
 func TestDeriveSessionResult_NoTurnsYetIsRunning(t *testing.T) {
-	got := deriveSessionResult("demo-1", conversationSnapshotDTO{})
-	if got.Status != string(sessionResultStatusRunning) {
-		t.Fatalf("status = %q, want running", got.Status)
+	for _, controller := range []string{"", "connecting", "ready", "busy", "recovering"} {
+		snapshot := conversationSnapshotDTO{Controller: controller}
+		got := deriveSessionResult("demo-1", snapshot)
+		if got.Status != string(sessionResultStatusRunning) {
+			t.Fatalf("controller=%q: status = %q, want running", controller, got.Status)
+		}
+		if got.Result != "" {
+			t.Fatalf("controller=%q: result should be empty, got %q", controller, got.Result)
+		}
+	}
+}
+
+// TestDeriveSessionResult_NoTurnsAndStoppedControllerIsFailed covers the
+// terminal/unavailable case: a durable conversation with no turns at all and
+// a stopped controller cannot produce a result, since nothing is dispatching
+// and nothing will unless a new message is sent. An orchestrator polling
+// `ao session result --json` must see a deterministic failure here rather than
+// "running" forever.
+func TestDeriveSessionResult_NoTurnsAndStoppedControllerIsFailed(t *testing.T) {
+	snapshot := conversationSnapshotDTO{Controller: "stopped"}
+	got := deriveSessionResult("demo-1", snapshot)
+	if got.Status != string(sessionResultStatusFailed) {
+		t.Fatalf("status = %q, want failed", got.Status)
 	}
 	if got.Result != "" {
 		t.Fatalf("result should be empty, got %q", got.Result)
+	}
+	if got.ErrorMessage == "" {
+		t.Fatal("expected a non-empty explanation of the stopped controller")
+	}
+	if got.summary() == "" {
+		t.Fatal("expected a non-empty human-readable summary")
+	}
+}
+
+// TestDeriveSessionResult_NoTurnsAndUnknownControllerFailsClosed covers an
+// unrecognized non-empty controller state: this must never be silently
+// treated as running, since that could hide a genuinely stuck session behind
+// an indefinite poll. It uses the existing malformed contract instead.
+func TestDeriveSessionResult_NoTurnsAndUnknownControllerFailsClosed(t *testing.T) {
+	snapshot := conversationSnapshotDTO{Controller: "some-future-controller-state"}
+	got := deriveSessionResult("demo-1", snapshot)
+	if got.Status != string(sessionResultStatusMalformed) {
+		t.Fatalf("status = %q, want malformed", got.Status)
+	}
+	if got.ErrorMessage == "" {
+		t.Fatal("expected a non-empty explanation of the unrecognized controller state")
 	}
 }
 
@@ -303,6 +351,38 @@ func TestSessionResult_MalformedConversationExitsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "malformed") && !strings.Contains(errOut, "malformed") {
 		t.Fatalf("error text should explain the malformed state: %v\nstderr=%s", err, errOut)
+	}
+}
+
+// TestSessionResult_StoppedControllerWithNoTurnsExitsNonZero covers the
+// terminal/unavailable case end-to-end: a session that has a durable
+// conversation but never started a turn, whose controller has stopped, must
+// exit non-zero with status=failed and an explanatory message rather than
+// leaving an orchestrator polling forever for a result that cannot arrive.
+func TestSessionResult_StoppedControllerWithNoTurnsExitsNonZero(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := conversationServer(t, http.StatusOK,
+		`{"conversationId":"conv-1","sessionId":"demo-1","mode":"chat","controller":"stopped","latestSequence":0,
+		  "turns":[],"messages":[]}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "session", "result", "demo-1", "--json")
+	if err == nil {
+		t.Fatal("expected non-zero exit for a stopped controller with no turns")
+	}
+	if ExitCode(err) != 1 {
+		t.Fatalf("exit code = %d, want 1", ExitCode(err))
+	}
+	if !strings.Contains(out, `"status": "failed"`) {
+		t.Fatalf("json output missing failed status:\n%s", out)
+	}
+	if strings.Contains(out, `"result"`) {
+		t.Fatalf("failed session must not report a result field:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "controller stopped") && !strings.Contains(errOut, "controller stopped") {
+		t.Fatalf("error text should explain the stopped controller: %v\nstderr=%s", err, errOut)
 	}
 }
 

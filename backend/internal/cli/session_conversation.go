@@ -16,7 +16,7 @@ type conversationSnapshotDTO struct {
 	ActiveBranchID string                   `json:"activeBranchId,omitempty"`
 	SessionID      string                   `json:"sessionId"`
 	Mode           string                   `json:"mode"`
-	Controller     string                   `json:"controller"`
+	Controller     string                   `json:"controller" enum:"connecting,ready,busy,recovering,stopped"`
 	Title          string                   `json:"title,omitempty"`
 	LatestSequence int64                    `json:"latestSequence"`
 	Turns          []conversationTurnDTO    `json:"turns"`

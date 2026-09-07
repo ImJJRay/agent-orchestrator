@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,10 @@ func (r sessionResultOutput) summary() string {
 		}
 		return fmt.Sprintf("turn %s is still %s", r.TurnID, r.TurnState)
 	case sessionResultStatusFailed:
+		if r.TurnID == "" {
+			// No turn ever ran; the controller itself is what closed off the result.
+			return r.ErrorMessage
+		}
 		if r.ErrorMessage != "" {
 			return fmt.Sprintf("turn %s ended as %s without a result: %s", r.TurnID, r.TurnState, r.ErrorMessage)
 		}
@@ -67,10 +72,11 @@ func newSessionResultCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "result <id>",
 		Short: "Fetch a session's completed terminal assistant result",
-		Long: "Fetch the final completed assistant message for a session, derived from its\n" +
-			"stored conversation (never generated, summarized, or inferred). Exits non-zero\n" +
-			"when the session has no completed result yet: still running, or ended without\n" +
-			"one.\n\n" +
+		Long: "Fetch the final completed assistant message for a session, derived from the\n" +
+			"daemon's stored Chat conversation for that session (never generated,\n" +
+			"summarized, or inferred). This reads the Chat-mode conversation only; it does\n" +
+			"not extract a result from a session running in TUI mode. Exits non-zero when\n" +
+			"the session has no completed result yet: still running, or ended without one.\n\n" +
 			"This is the way an orchestrator should consume a worker session's output —\n" +
 			"prefer it over `ao session conversation`, which returns the full transcript.",
 		Example: `  ao session result mer-3
@@ -126,7 +132,7 @@ func writeSessionResultText(cmd *cobra.Command, result sessionResultOutput) erro
 func deriveSessionResult(sessionID string, snapshot conversationSnapshotDTO) sessionResultOutput {
 	turn, ok := lastActiveTurn(snapshot.Turns)
 	if !ok {
-		return sessionResultOutput{SessionID: sessionID, Status: string(sessionResultStatusRunning)}
+		return sessionResultForNoActiveTurn(sessionID, snapshot.Controller)
 	}
 
 	switch turn.State {
@@ -168,6 +174,38 @@ func deriveSessionResult(sessionID string, snapshot conversationSnapshotDTO) ses
 			SessionID: sessionID, Status: string(sessionResultStatusMalformed),
 			TurnID: turn.ID, TurnState: turn.State,
 			ErrorMessage: fmt.Sprintf("unrecognized turn state %q", turn.State),
+		}
+	}
+}
+
+// sessionResultForNoActiveTurn classifies a snapshot that has never had a turn
+// (or whose only turns were rolled back), using the conversation's controller
+// state to tell "a result may still arrive" from "no result is capable of
+// arriving here". A turn's own state always takes priority over this when one
+// exists; this only covers the case where none does.
+func sessionResultForNoActiveTurn(sessionID, controller string) sessionResultOutput {
+	switch ports.ChatControllerState(controller) {
+	// The empty string is what a bare snapshot reports when the daemon has never
+	// set a controller field at all (e.g. an older daemon, or a session that
+	// predates this field). Treating it as running preserves the CLI's original
+	// behavior for that case rather than newly failing it.
+	case "", ports.ChatControllerConnecting, ports.ChatControllerReady,
+		ports.ChatControllerBusy, ports.ChatControllerRecovering:
+		return sessionResultOutput{SessionID: sessionID, Status: string(sessionResultStatusRunning)}
+
+	case ports.ChatControllerStopped:
+		// A stopped controller with no active turn cannot produce a result: nothing
+		// is dispatching, and nothing ever will unless a caller sends a new message.
+		// Reporting "running" here would leave an orchestrator polling forever.
+		return sessionResultOutput{
+			SessionID: sessionID, Status: string(sessionResultStatusFailed),
+			ErrorMessage: "session controller stopped before producing a result",
+		}
+
+	default:
+		return sessionResultOutput{
+			SessionID: sessionID, Status: string(sessionResultStatusMalformed),
+			ErrorMessage: fmt.Sprintf("unrecognized controller state %q", controller),
 		}
 	}
 }
