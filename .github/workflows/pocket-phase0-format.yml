@@ -1,0 +1,40 @@
+name: Pocket Phase 0 format
+
+on:
+  push:
+    branches:
+      - feature/phase0-baseline-reconstruction
+
+permissions:
+  contents: write
+
+jobs:
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase0-baseline-reconstruction
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Format changed Go files
+        run: |
+          gofmt -w \
+            backend/internal/cli/session.go \
+            backend/internal/cli/session_test.go \
+            backend/internal/cli/session_conversation.go \
+            backend/internal/cli/session_conversation_test.go \
+            backend/internal/cli/session_result.go \
+            backend/internal/cli/session_result_test.go \
+            backend/internal/session_manager/manager.go \
+            backend/internal/session_manager/model_restore_test.go \
+            backend/internal/telemetrymeta/cli.go
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add backend/internal
+            git commit -m "chore: gofmt Phase 0 changes"
+            git push origin HEAD:feature/phase0-baseline-reconstruction
+          fi
