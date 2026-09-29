@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -293,6 +294,13 @@ func New(opts Options) *Runtime {
 	}
 	if shellPath == "" {
 		shellPath = "/bin/sh"
+		if runtime.GOOS == "android" {
+			if native, err := exec.LookPath("sh"); err == nil {
+				shellPath = native
+			} else {
+				shellPath = "/system/bin/sh"
+			}
+		}
 	}
 	chunkSize := opts.ChunkSize
 	if chunkSize <= 0 {

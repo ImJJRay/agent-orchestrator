@@ -63,7 +63,11 @@ func pinDirectory(exe, dataDir string) (string, error) {
 	sum := sha256.Sum256([]byte(absolute))
 	shimDir := filepath.Join(dataDir, "runtime", "ao-path", fmt.Sprintf("%x", sum[:16]))
 	name := "ao"
-	script := "#!/bin/sh\nexec '" + strings.ReplaceAll(absolute, "'", `'"'"'`) + "' \"$@\"\n"
+	shebang, err := shimShell(runtime.GOOS)
+	if err != nil {
+		return "", err
+	}
+	script := "#!" + shebang + "\nexec '" + strings.ReplaceAll(absolute, "'", `'"'"'`) + "' \"$@\"\n"
 	if runtime.GOOS == "windows" {
 		name = "ao.cmd"
 		script = "@echo off\r\n\"" + strings.ReplaceAll(absolute, "%", "%%") + "\" %*\r\n"

@@ -257,6 +257,9 @@ func (b *BridgeService) Status() MobileStatusResponse {
 		res.Password = st.Password
 	}
 	res.SecurePairing = b.securePairingStatus(st.SecurePairing, enabled)
+	if sp := res.SecurePairing; sp.Active {
+		res.Endpoints = append(res.Endpoints, mobilebridge.Endpoint{Kind: mobilebridge.KindTailscale, Host: sp.Host, Port: sp.Port, Secure: true})
+	}
 	res.KeepAwake = b.keepAwakeStatus(st.KeepAwake)
 	return res
 }
@@ -264,12 +267,7 @@ func (b *BridgeService) Status() MobileStatusResponse {
 // AdvertisedEndpoints reports how this daemon can currently be reached, for
 // the phone's refresh route. Same list Status carries, so the two cannot drift.
 func (b *BridgeService) AdvertisedEndpoints() []mobilebridge.Endpoint {
-	return mobilebridge.Endpoints(mobilebridge.EndpointInputs{
-		LANHosts:       b.lanHosts(),
-		TailscaleHosts: b.tailscaleHosts(),
-		Port:           b.LAN.BoundPort(),
-		Tunnel:         b.tunnelEndpoint(),
-	})
+	return b.Status().Endpoints
 }
 
 // tunnel reads the current connector without resolving one.

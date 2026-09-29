@@ -196,6 +196,11 @@ func ManagedCloudflaredPath(dataDir string) string {
 // LocalCloudflaredLookup builds the production lookup: the real PATH, the real
 // filesystem, and `cloudflared --version` for the version gate.
 func LocalCloudflaredLookup(dataDir string) CloudflaredLookup {
+	// A portable private-tailnet deployment must not auto-start a public
+	// quick tunnel just because cloudflared happens to be installed.
+	if os.Getenv("AO_MOBILE_TAILNET_ONLY") == "1" {
+		return CloudflaredLookup{}
+	}
 	return CloudflaredLookup{
 		EnvPath:     os.Getenv("AO_CLOUDFLARED_PATH"),
 		ManagedPath: ManagedCloudflaredPath(dataDir),

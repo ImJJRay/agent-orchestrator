@@ -5784,7 +5784,7 @@ func (m *Manager) validateRuntimePrerequisites() error {
 		return nil
 	}
 	if resolution, err := tmuxbin.ResolveWith(os.Getenv("AO_TMUX_BINARY"), m.executable, m.lookPath); err != nil || resolution.Path == "" {
-		return fmt.Errorf("%w: tmux required on macOS but AO's configured, bundled, or system tmux was not found", ports.ErrRuntimePrerequisite)
+		return fmt.Errorf("%w: tmux required on %s but AO's configured, bundled, or system tmux was not found", ports.ErrRuntimePrerequisite, runtime.GOOS)
 	}
 	return nil
 }

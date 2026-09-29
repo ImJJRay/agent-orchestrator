@@ -216,6 +216,20 @@ func TestSecurePairingStatusActive(t *testing.T) {
 	if sp.Reason != "" {
 		t.Errorf("Reason = %q, want empty when available", sp.Reason)
 	}
+	// Userspace Tailscale has no tunnel NIC. Both pairing and endpoint refresh
+	// must still advertise the verified HTTPS endpoint.
+	b.PickTailscaleHosts = func() []string { return nil }
+	for _, endpoints := range [][]mobilebridge.Endpoint{b.Status().Endpoints, b.AdvertisedEndpoints()} {
+		found := false
+		for _, endpoint := range endpoints {
+			if endpoint.Kind == mobilebridge.KindTailscale && endpoint.Host == sp.Host && endpoint.Port == 443 && endpoint.Secure {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing secure endpoint: %+v", endpoints)
+		}
+	}
 }
 
 func TestSecurePairingReasons(t *testing.T) {

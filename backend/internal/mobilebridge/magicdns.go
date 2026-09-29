@@ -3,6 +3,7 @@ package mobilebridge
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
@@ -19,7 +20,14 @@ type TailscaleRunner func(ctx context.Context, args ...string) ([]byte, error)
 
 // execTailscale is the production TailscaleRunner.
 func execTailscale(ctx context.Context, args ...string) ([]byte, error) {
-	return aoprocess.CommandContext(ctx, "tailscale", args...).Output()
+	binary := strings.TrimSpace(os.Getenv("AO_TAILSCALE_BINARY"))
+	if binary == "" {
+		binary = "tailscale"
+	}
+	if socket := strings.TrimSpace(os.Getenv("AO_TAILSCALE_SOCKET")); socket != "" {
+		args = append([]string{"--socket=" + socket}, args...)
+	}
+	return aoprocess.CommandContext(ctx, binary, args...).Output()
 }
 
 // TailscaleInfo is what the local daemon can tell us about this node.

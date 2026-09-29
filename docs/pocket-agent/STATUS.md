@@ -54,3 +54,95 @@ The repository-wide `go test -race -count=1 -timeout=20m ./...` suite is intenti
 ## Deferred
 
 Android/Termux ARM64, SQLite/Git/worktree validation on the AYN Thor Max, OpenCode runtime validation on-device, Connect Mobile/Tailscale pairing, JEV, DSH, Layla, Shizuku, and broader routing policy are outside Phase 0.
+
+## Thor Runtime + iPhone Remote Control milestone
+
+Implemented as one cohesive feature from `pocket-main`, based on current upstream
+`b188dd3bf03c331e01cb1c43f93163811cd33a15`. No upstream commits were missing at
+inspection. The Phase 0 functionality was retained, not reimplemented.
+
+### Exact custom delta
+
+- Android-safe AO hook-shim interpreter: resolve native `sh` instead of writing
+  a `/bin/sh` shebang. Android tmux fallback likewise resolves a native shell.
+- Runtime prerequisite errors identify the actual OS. Android continues using
+  upstream tmux; desktop Linux keeps its existing detached PTY path.
+- Thin `ao mobile` CLI for existing loopback status/enable/disable/regenerate and
+  secure-pairing controls, plus mobile-app-compatible v2 pairing links. Repeated
+  CLI enable preserves pairing credentials. Default pairing requires verified
+  private HTTPS; trusted-LAN pairing is explicit. No mobile control route was
+  exposed through the authenticated listener.
+- Secure Tailscale endpoints appear in mobile status and endpoint refresh even
+  when userspace networking has no tunnel NIC.
+- Explicit `AO_TAILSCALE_BINARY` / `AO_TAILSCALE_SOCKET` configuration applies to
+  discovery and the entire upstream Serve lifecycle.
+- `AO_MOBILE_TAILNET_ONLY=1` prevents automatic public Cloudflare connector
+  selection. No Funnel, public listener, custom proxy, or new transport was added.
+- Native Termux bootstrap, pinned native OpenCode installer, headless daemon/node
+  start commands, and isolated deterministic validation script. See
+  [THOR.md](THOR.md) for the complete sequence and evidence boundaries.
+- Mobile command telemetry classification and focused CLI/platform/mobile tests.
+
+### Upstream work avoided
+
+The unmodified backend already cross-builds for Android ARM64, including modernc
+SQLite and existing Unix process/PTY packages. Connect Mobile already operates
+without Electron and restores credentials/listeners on boot. OpenCode Chat/ACP,
+worktrees, model selection and restore are upstream capabilities. No dependency
+fork, new adapter, replacement mobile client, proot, generated-file edits, JEV,
+DSH, Pi evaluation, Layla, Shizuku, or broad policy work was introduced.
+
+### Validation actually performed
+
+- Unmodified baseline and modified AO Android ARM64 cross-builds with CGO off.
+- Official Tailscale v1.102.5 CLI and daemon Android ARM64 cross-builds with
+  `ts_omit_systray,ts_omit_ssh`; verified Android ELF interpreter and PIE output.
+  Native bootstrap uses CGO on for Android/bionic DNS; native execution is pending.
+- Downloaded native OpenCode v2.0.12 community package: SHA256 and Termux control
+  metadata verified. No Android execution or ACP/provider turn is claimed.
+- Isolated Linux diagnostic: executable, daemon readiness, migrated SQLite,
+  loopback health/readiness/identity, API project registration, native Git
+  worktree isolation, mobile bearer auth, mobile control-route exclusion and
+  password/identity-preserving daemon restart passed.
+- Complete CLI, telemetrymeta, agentlaunch, tmux, OpenCode adapter and ACP package
+  suites passed. Complete mobilebridge and controller suites passed under an
+  unprivileged user (their permission-denial fixtures fail when run as root).
+- Focused race checks passed for mobile controls/secure pairing and the existing
+  OpenCode session-model/project-default restore regressions.
+- `go build ./...`, `go vet ./...`, and pinned golangci-lint v2.13.2 passed
+  with zero lint findings. Final CLI/agentlaunch/telemetry recheck and API
+  schema drift/parity checks passed. No API schema changes were required.
+- Shell syntax and Python compilation passed for deployment/validation scripts.
+
+The repository-wide `go test -race ./...` was not run, consistent with the user's
+explicit development-loop constraint. Remote cross-platform CI and physical
+Android/iPhone checks are not implied by these local passes.
+
+### Physical Thor/iPhone tests still required
+
+1. Run native bootstrap: CGO/clang link, native DNS, Android process/sockets,
+   SQLite, Git/worktrees and daemon initialization.
+2. Install/authenticate native OpenCode and run `validate-thor.py --chat
+   'provider/model'`: real AO-owned worktree edit, exact result, model persistence,
+   daemon/session restore and follow-up turn.
+3. Optionally run `--tui`: native tmux/PTY/prompt/file-edit and restore acceptance.
+4. Start/authenticate the separate userspace Tailscale node, enable HTTPS/Serve,
+   and run `--secure` for production Serve/login configuration validation.
+5. Pair the existing AO iPhone client away from LAN, create a Chat worker, inspect
+   changed files/result and reconnect/restore after AO restart.
+
+### Known limitations and next batch
+
+The Android VPN app has no desktop CLI, so it alone cannot drive secure pairing.
+The supplied userspace node is separately authenticated and must be validated on
+Thor. It does not install OS-level tailnet routes/MagicDNS inside Termux; peer
+TLS/reachability must be checked from another tailnet device. The OpenCode package
+is a community native prerelease; compatibility is an acceptance test, not an
+assumption. Android background-process survival and boot supervision are not
+claimed. TUI has no canonical semantic result source; `ao session result` remains
+Chat-only. There is no physical-device validation in this status update.
+
+Next: resolve any failures from the deterministic Thor/iPhone sequence. Once that
+path is proven, implement deterministic routing/telemetry, followed by bounded
+JEV and optional harness evaluation. Do not promote routing work ahead of an
+operational control plane.
