@@ -231,7 +231,7 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 				Config: domain.ProjectConfig{
 					AgentConfig: domain.AgentConfig{Model: "project-before", Effort: "low"},
 					Worker: domain.RoleOverride{
-						Harness: domain.HarnessOpenCode,
+						Harness:     domain.HarnessOpenCode,
 						AgentConfig: domain.AgentConfig{Model: "role-before", Effort: "medium"},
 					},
 				},
@@ -266,7 +266,7 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 			rec, _, _, err := manager.Spawn(ctx, ports.SpawnConfig{
 				ProjectID: "oc", Kind: domain.KindWorker, Prompt: "continue",
 				RequestedMode: mode,
-				AgentConfig: ports.AgentConfig{Model: "session-model", Effort: "high"},
+				AgentConfig:   ports.AgentConfig{Model: "session-model", Effort: "high"},
 			})
 			if err != nil {
 				t.Fatalf("spawn: %v", err)

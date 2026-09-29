@@ -47,7 +47,7 @@ func TestDeriveSessionResult_StateClassification(t *testing.T) {
 		{"cancelled", conversationSnapshotDTO{Turns: []conversationTurnDTO{{ID: "t", State: "cancelled"}}}, "failed"},
 		{"completed-without-assistant", conversationSnapshotDTO{Turns: []conversationTurnDTO{{ID: "t", State: "completed"}}}, "malformed"},
 		{"completed-streaming", conversationSnapshotDTO{
-			Turns: []conversationTurnDTO{{ID: "t", State: "completed"}},
+			Turns:    []conversationTurnDTO{{ID: "t", State: "completed"}},
 			Messages: []conversationMessageDTO{{ID: "m", TurnID: "t", Role: "assistant", Text: "partial", Streaming: true}},
 		}, "malformed"},
 		{"unknown-turn", conversationSnapshotDTO{Turns: []conversationTurnDTO{{ID: "t", State: "future-state"}}}, "malformed"},
