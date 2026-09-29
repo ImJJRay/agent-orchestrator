@@ -8,8 +8,8 @@ This file records Pocket Agent project state only. Upstream product status remai
 
 - Upstream mirror `main`: `b188dd3bf03c331e01cb1c43f93163811cd33a15`.
 - Legacy custom branch preserved as `quant-main-pre-upstream-2026-09-29` at `a8bbbc06f33b51f0db9d8eb135bda84eccfd1188`.
-- `quant-main` currently matches upstream `main`.
-- Phase 0 final integration branch: `feature/phase0-baseline-final`.
+- Phase 0 custom baseline is integrated into `quant-main`.
+- Final integration branch: `feature/phase0-baseline-final`.
 
 ## Phase 0 custom delta
 
@@ -22,7 +22,7 @@ This file records Pocket Agent project state only. Upstream product status remai
   - Returns the exact final assistant output from the most recent relevant non-rolled-back completed/recovered turn.
   - Stable JSON statuses: `completed`, `running`, `failed`, `malformed`.
   - Non-completed states return a non-success exit status.
-- Session CLI output exposes the execution profile needed by a future orchestrator: `harness`, `mode`, and resolved persisted `model`.
+- Session CLI output exposes `harness`, `mode`, and resolved persisted `model`.
 - Restore pins the persisted session model for every harness so later project-default changes do not change a restored worker's model. Existing harness-specific effort semantics are unchanged.
 
 ## September code deliberately not replayed
@@ -31,16 +31,23 @@ Current upstream already owns OpenCode launch/restore `--model` handling, model 
 
 The old result-retrieval commit was reimplemented against the current paginated, branch-aware conversation architecture rather than replayed.
 
-## Validation
+## Validation performed
 
-Focused regression coverage exists for:
+Passed:
 
-- OpenCode per-session model continuity across TUI and Chat restore after project defaults change and SQLite reopen.
-- Conversation pagination and branch-consistency handling.
-- Deterministic result selection, rollback handling, running/failed/malformed states, and exit behavior.
-- CLI harness/mode/model visibility.
+- Focused Linux race regression for the existing Claude restore matrix and the new OpenCode TUI/Chat model-persistence invariant.
+- Go formatting.
+- `go build ./...`
+- `go vet ./...`
+- golangci-lint.
+- API drift check.
+- sqlc drift check.
+- Cloud Go build/vet/test job.
+- gitleaks.
+- CLI E2E fresh-install container and Linux native jobs on the clean final branch.
+- The immediately preceding reconstruction of the same Pocket Agent delta also passed CLI E2E on Linux, macOS, Windows and the Windows workspace/session job.
 
-The repository-standard CI gates on the final integration branch are the completion gate for Phase 0.
+The repository-wide `go test -race -count=1 -timeout=20m ./...` suite is intentionally not a Phase 0 completion gate for this cycle. It was explicitly stopped after repeated long-running CI executions. No pass is claimed for that full suite.
 
 ## Deferred
 
