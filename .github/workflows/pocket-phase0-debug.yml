@@ -1,0 +1,46 @@
+name: Pocket Phase 0 debug
+
+on:
+  push:
+    branches:
+      - feature/phase0-baseline-reconstruction
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+      - name: Run focused Phase 0 tests
+        id: focused
+        shell: bash
+        run: |
+          set +e
+          go test -race -count=1 -v ./internal/session_manager -run 'Test(ClaudeSessionModelSurvivesRestore|OpenCodeSessionModelSurvivesProjectDefaultChange)$' > /tmp/phase0.log 2>&1
+          status=$?
+          cat /tmp/phase0.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Post focused test output
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### Phase 0 focused test output'
+            echo '```'
+            tail -c 60000 /tmp/phase0.log
+            echo '```'
+            echo "exit status: ${{ steps.focused.outputs.status }}"
+          } > /tmp/comment.md
+          gh pr comment 3 --body-file /tmp/comment.md
