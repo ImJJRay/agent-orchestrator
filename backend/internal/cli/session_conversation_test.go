@@ -137,7 +137,7 @@ func TestSessionCommand_HelpDiscoversConversationAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help failed: %v\nstderr=%s", err, errOut)
 	}
-	for _, want := range []string{"conversation", "result"} {
+	for _, want := range []string{"conversation", "execution", "result"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
