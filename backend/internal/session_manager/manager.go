@@ -1922,10 +1922,11 @@ func effectiveAgentConfig(harness domain.AgentHarness, kind domain.SessionKind, 
 
 func restoredAgentConfig(rec domain.SessionRecord, cfg domain.ProjectConfig) ports.AgentConfig {
 	merged := effectiveAgentConfig(rec.Harness, rec.Kind, cfg)
-	if rec.Harness == domain.HarnessClaudeCode {
-		merged.Model = rec.Metadata.Model
-		merged.Effort = rec.Metadata.Effort
-	}
+	// Model and effort are resolved once at spawn and persisted on the session.
+	// Restoration must use that durable execution profile rather than later
+	// project defaults; an empty value deliberately means the provider default.
+	merged.Model = rec.Metadata.Model
+	merged.Effort = rec.Metadata.Effort
 	return merged
 }
 
