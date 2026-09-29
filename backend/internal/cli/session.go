@@ -49,6 +49,8 @@ type sessionDTO struct {
 	IssueID      string          `json:"issueId,omitempty"`
 	Kind         string          `json:"kind"`
 	Harness      string          `json:"harness,omitempty"`
+	Mode         string          `json:"mode,omitempty"`
+	Model        string          `json:"model,omitempty"`
 	DisplayName  string          `json:"displayName,omitempty"`
 	Activity     sessionActivity `json:"activity"`
 	IsTerminated bool            `json:"isTerminated"`
@@ -163,6 +165,8 @@ type sessionListEntry struct {
 	Activity       string          `json:"activity,omitempty"`
 	IssueID        string          `json:"issueId,omitempty"`
 	Harness        string          `json:"harness,omitempty"`
+	Mode           string          `json:"mode,omitempty"`
+	Model          string          `json:"model,omitempty"`
 	Branch         string          `json:"branch,omitempty"`
 	PRs            []sessionListPR `json:"prs"`
 	IsTerminated   bool            `json:"isTerminated"`
@@ -193,6 +197,8 @@ func newSessionCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.AddCommand(newSessionListCommand(ctx))
 	cmd.AddCommand(newSessionGetCommand(ctx))
+	cmd.AddCommand(newSessionConversationCommand(ctx))
+	cmd.AddCommand(newSessionResultCommand(ctx))
 	cmd.AddCommand(newSessionKillCommand(ctx))
 	cmd.AddCommand(newSessionRestoreCommand(ctx))
 	cmd.AddCommand(newSessionExitAgentCommand(ctx))
@@ -849,6 +855,8 @@ func sessionListEntries(sessions []sessionDTO, summaries map[string][]sessionPRS
 			Activity:       sess.Activity.State,
 			IssueID:        sess.IssueID,
 			Harness:        sess.Harness,
+			Mode:           sess.Mode,
+			Model:          sess.Model,
 			Branch:         sess.Branch,
 			PRs:            listPRsForSession(sess, summaries[sess.ID]),
 			IsTerminated:   sess.IsTerminated,
@@ -1000,6 +1008,8 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 		{"status", sess.Status},
 		{"activity", sess.Activity.State},
 		{"harness", sess.Harness},
+		{"mode", sess.Mode},
+		{"model", sess.Model},
 		{"issue", sess.IssueID},
 		{"terminated", fmt.Sprintf("%t", sess.IsTerminated)},
 	}
