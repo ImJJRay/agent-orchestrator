@@ -1922,8 +1922,12 @@ func effectiveAgentConfig(harness domain.AgentHarness, kind domain.SessionKind, 
 
 func restoredAgentConfig(rec domain.SessionRecord, cfg domain.ProjectConfig) ports.AgentConfig {
 	merged := effectiveAgentConfig(rec.Harness, rec.Kind, cfg)
+	// The resolved model is durable session state and must not drift when project
+	// defaults change. Keep effort handling at the harness boundary upstream
+	// already defines: Claude Code snapshots it; other harnesses retain their
+	// existing effort semantics.
+	merged.Model = rec.Metadata.Model
 	if rec.Harness == domain.HarnessClaudeCode {
-		merged.Model = rec.Metadata.Model
 		merged.Effort = rec.Metadata.Effort
 	}
 	return merged

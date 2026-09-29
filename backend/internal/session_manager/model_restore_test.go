@@ -210,3 +210,114 @@ func TestClaudeSessionModelSurvivesRestore(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
+	for _, mode := range []domain.SessionMode{domain.SessionModeTUI, domain.SessionModeChat} {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx := context.Background()
+			dataDir := t.TempDir()
+			store, err := sqlitetest.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if store != nil {
+					_ = store.Close()
+				}
+			})
+
+			project := domain.ProjectRecord{
+				ID: "oc", Path: t.TempDir(), RegisteredAt: time.Now().UTC(),
+				Config: domain.ProjectConfig{
+					AgentConfig: domain.AgentConfig{Model: "project-before"},
+					Worker: domain.RoleOverride{
+						Harness:     domain.HarnessOpenCode,
+						AgentConfig: domain.AgentConfig{Model: "role-before"},
+					},
+				},
+			}
+			if err := store.UpsertProject(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+
+			agent := &recordingAgent{}
+			runtime := &fakeRuntime{}
+			workspace := &fakeWorkspace{path: t.TempDir()}
+			launcher := &recordingLauncher{}
+			newManager := func() *Manager {
+				messenger := &fakeMessenger{}
+				manager := New(Deps{
+					Runtime: runtime, Agents: singleAgent{agent: agent}, Workspace: workspace,
+					Store: store, Messenger: messenger, Lifecycle: lifecycle.New(store, messenger),
+					Chat: launcher, DataDir: dataDir,
+					LookPath: func(string) (string, error) { return "/bin/true", nil },
+				})
+				manager.SetModelCatalog(tuningCatalog{catalog: ports.AgentModelCatalog{Models: []ports.AgentModelInfo{
+					{ID: "project-before", Efforts: []string{"low", "medium", "high"}},
+					{ID: "role-before", Efforts: []string{"low", "medium", "high"}},
+					{ID: "session-model", Efforts: []string{"low", "medium", "high"}},
+					{ID: "project-after", Efforts: []string{"low", "medium", "high"}},
+					{ID: "role-after", Efforts: []string{"low", "medium", "high"}},
+				}}})
+				return manager
+			}
+
+			manager := newManager()
+			rec, _, _, err := manager.Spawn(ctx, ports.SpawnConfig{
+				ProjectID: "oc", Kind: domain.KindWorker, Prompt: "continue",
+				RequestedMode: mode,
+				AgentConfig:   ports.AgentConfig{Model: "session-model", Effort: "high"},
+			})
+			if err != nil {
+				t.Fatalf("spawn: %v", err)
+			}
+			if rec.Metadata.Model != "session-model" {
+				t.Fatalf("spawn metadata model=%q, want session-model", rec.Metadata.Model)
+			}
+
+			rec.IsTerminated = true
+			rec.Activity.State = domain.ActivityExited
+			rec.Metadata.AgentSessionID = "native-opencode-model-test"
+			if err := store.UpdateSession(ctx, rec); err != nil {
+				t.Fatal(err)
+			}
+			project.Config.AgentConfig.Model = "project-after"
+			project.Config.Worker.AgentConfig.Model = "role-after"
+			if err := store.UpsertProject(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store = nil
+			store, err = sqlite.Open(dataDir)
+			if err != nil {
+				t.Fatalf("reopen store: %v", err)
+			}
+			manager = newManager()
+			*agent = recordingAgent{}
+			launcher.started = nil
+			runtime.created = 0
+
+			if _, err := manager.RestoreWithMode(ctx, rec.ID); err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if mode == domain.SessionModeChat {
+				if len(launcher.started) != 1 {
+					t.Fatalf("chat controller starts = %d, want 1", len(launcher.started))
+				}
+				if got := launcher.started[0].Model; got != "session-model" {
+					t.Fatalf("restored Chat model = %q, want session-model", got)
+				}
+			} else {
+				if runtime.created != 1 {
+					t.Fatalf("TUI runtime Create calls = %d, want 1", runtime.created)
+				}
+				if got := agent.lastConfig.Model; got != "session-model" {
+					t.Fatalf("restored TUI model = %q, want session-model", got)
+				}
+			}
+		})
+	}
+}
