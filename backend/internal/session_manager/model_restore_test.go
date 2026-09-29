@@ -211,7 +211,6 @@ func TestClaudeSessionModelSurvivesRestore(t *testing.T) {
 	}
 }
 
-
 func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 	for _, mode := range []domain.SessionMode{domain.SessionModeTUI, domain.SessionModeChat} {
 		t.Run(string(mode), func(t *testing.T) {
