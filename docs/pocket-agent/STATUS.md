@@ -8,8 +8,9 @@ This file records Pocket Agent project state only. Upstream product status remai
 
 - Upstream mirror `main`: `b188dd3bf03c331e01cb1c43f93163811cd33a15`.
 - Legacy custom branch preserved as `quant-main-pre-upstream-2026-09-29` at `a8bbbc06f33b51f0db9d8eb135bda84eccfd1188`.
-- Phase 0 custom baseline is integrated into `quant-main`.
-- Final integration branch: `feature/phase0-baseline-final`.
+- Active Pocket Agent integration branch: `pocket-main`.
+- Legacy branch name `quant-main` is superseded by `pocket-main` and should not receive new work.
+- Phase 0 custom baseline is integrated into `pocket-main`.
 
 ## Phase 0 custom delta
 
@@ -36,6 +37,7 @@ The old result-retrieval commit was reimplemented against the current paginated,
 Passed:
 
 - Focused Linux race regression for the existing Claude restore matrix and the new OpenCode TUI/Chat model-persistence invariant.
+- Focused restore regression covering legacy sessions without persisted model metadata, persisted-session model precedence, and OpenCode TUI/Chat restore behavior.
 - Go formatting.
 - `go build ./...`
 - `go vet ./...`
