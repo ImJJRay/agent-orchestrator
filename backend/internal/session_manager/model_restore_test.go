@@ -229,10 +229,10 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 			project := domain.ProjectRecord{
 				ID: "oc", Path: t.TempDir(), RegisteredAt: time.Now().UTC(),
 				Config: domain.ProjectConfig{
-					AgentConfig: domain.AgentConfig{Model: "project-before", Effort: "low"},
+					AgentConfig: domain.AgentConfig{Model: "project-before"},
 					Worker: domain.RoleOverride{
 						Harness:     domain.HarnessOpenCode,
-						AgentConfig: domain.AgentConfig{Model: "role-before", Effort: "medium"},
+						AgentConfig: domain.AgentConfig{Model: "role-before"},
 					},
 				},
 			}
@@ -271,8 +271,8 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 			if err != nil {
 				t.Fatalf("spawn: %v", err)
 			}
-			if rec.Metadata.Model != "session-model" || rec.Metadata.Effort != "high" {
-				t.Fatalf("spawn metadata model=%q effort=%q, want session-model/high", rec.Metadata.Model, rec.Metadata.Effort)
+			if rec.Metadata.Model != "session-model" {
+				t.Fatalf("spawn metadata model=%q, want session-model", rec.Metadata.Model)
 			}
 
 			rec.IsTerminated = true
@@ -282,9 +282,7 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 				t.Fatal(err)
 			}
 			project.Config.AgentConfig.Model = "project-after"
-			project.Config.AgentConfig.Effort = "medium"
 			project.Config.Worker.AgentConfig.Model = "role-after"
-			project.Config.Worker.AgentConfig.Effort = "low"
 			if err := store.UpsertProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
@@ -312,18 +310,12 @@ func TestOpenCodeSessionModelSurvivesProjectDefaultChange(t *testing.T) {
 				if got := launcher.started[0].Model; got != "session-model" {
 					t.Fatalf("restored Chat model = %q, want session-model", got)
 				}
-				if got := launcher.started[0].Effort; got != "high" {
-					t.Fatalf("restored Chat effort = %q, want high", got)
-				}
 			} else {
 				if runtime.created != 1 {
 					t.Fatalf("TUI runtime Create calls = %d, want 1", runtime.created)
 				}
 				if got := agent.lastConfig.Model; got != "session-model" {
 					t.Fatalf("restored TUI model = %q, want session-model", got)
-				}
-				if got := agent.lastConfig.Effort; got != "high" {
-					t.Fatalf("restored TUI effort = %q, want high", got)
 				}
 			}
 		})
