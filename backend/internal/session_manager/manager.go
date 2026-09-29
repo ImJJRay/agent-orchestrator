@@ -1926,7 +1926,9 @@ func restoredAgentConfig(rec domain.SessionRecord, cfg domain.ProjectConfig) por
 	// defaults change. Keep effort handling at the harness boundary upstream
 	// already defines: Claude Code snapshots it; other harnesses retain their
 	// existing effort semantics.
-	merged.Model = rec.Metadata.Model
+	if rec.Metadata.Model != "" {
+		merged.Model = rec.Metadata.Model
+	}
 	if rec.Harness == domain.HarnessClaudeCode {
 		merged.Effort = rec.Metadata.Effort
 	}
