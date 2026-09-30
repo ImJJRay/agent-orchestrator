@@ -118,9 +118,9 @@ type PocketValidationResult struct {
 }
 
 type PocketValidationEvidence struct {
-	Requirement   PocketValidationRequirement `json:"requirement"`
+	Requirement    PocketValidationRequirement `json:"requirement"`
 	EffectiveState PocketValidationState       `json:"effectiveState"`
-	Results       []PocketValidationResult     `json:"results"`
+	Results        []PocketValidationResult     `json:"results"`
 }
 
 type PocketExecutionSnapshot struct {
