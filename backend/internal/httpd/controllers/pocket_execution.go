@@ -107,7 +107,7 @@ type createPocketValidationResultRequest struct {
 
 func (c *PocketStateController) createTask(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
-		writePocketError(w, r, errors.New("Pocket state service unavailable"))
+		writePocketError(w, r, errors.New("pocket state service unavailable"))
 		return
 	}
 	var req createPocketTaskRequest
