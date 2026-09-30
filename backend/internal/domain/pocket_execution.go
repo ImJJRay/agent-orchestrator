@@ -125,6 +125,7 @@ type PocketExecutionSnapshot struct {
 	Task            PocketTask                 `json:"task"`
 	Worker          PocketWorker               `json:"worker"`
 	Execution       PocketExecution            `json:"execution"`
+	Attempts        []PocketExecution           `json:"attempts"`
 	ValidationState PocketValidationState      `json:"validationState"`
 	Validation      []PocketValidationEvidence `json:"validation"`
 }
