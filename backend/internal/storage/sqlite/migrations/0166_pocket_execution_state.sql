@@ -33,7 +33,7 @@ CREATE TABLE pocket_executions (
     workspace_path      TEXT NOT NULL DEFAULT '',
     workspace_repo_path TEXT NOT NULL DEFAULT '',
     state               TEXT NOT NULL DEFAULT 'unknown'
-        CHECK (state IN ('unknown', 'queued', 'running', 'completed', 'failed', 'interrupted')),
+        CHECK (state IN ('unknown', 'queued', 'running', 'completed', 'recovered', 'failed', 'interrupted', 'cancelled')),
     started_at          TIMESTAMP,
     completed_at        TIMESTAMP,
     created_at          TIMESTAMP NOT NULL,
