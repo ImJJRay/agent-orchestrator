@@ -475,6 +475,38 @@ VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
 	return req, nil
 }
 
+// CreatePocketValidationCommandRequirement persists a validation requirement
+// whose deterministic implementation is a shell command executed in the owning
+// AO worktree. The older method remains source-compatible for callers that only
+// describe a check; those requirements intentionally validate as unknown.
+func (s *Store) CreatePocketValidationCommandRequirement(
+	ctx context.Context,
+	taskID, executionID, checkID, description, command string,
+	scope domain.PocketValidationScope,
+	deterministic, required bool,
+	now time.Time,
+) (domain.PocketValidationRequirement, error) {
+	req, err := s.CreatePocketValidationRequirement(
+		ctx, taskID, executionID, checkID, description, scope, deterministic, required, now)
+	if err != nil {
+		return domain.PocketValidationRequirement{}, err
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return req, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := s.writeDB.ExecContext(ctx,
+		`UPDATE pocket_validation_requirements SET command = ? WHERE id = ?`,
+		command, req.ID,
+	); err != nil {
+		return domain.PocketValidationRequirement{}, fmt.Errorf("store deterministic validation command: %w", err)
+	}
+	req.Command = command
+	return req, nil
+}
+
 // CreatePocketValidationResult appends one timestamped validation observation with provenance.
 func (s *Store) CreatePocketValidationResult(
 	ctx context.Context,
@@ -653,7 +685,7 @@ func (s *Store) pocketValidationRequirements(
 	execution domain.PocketExecution,
 ) (requirements []domain.PocketValidationRequirement, err error) {
 	rows, err := s.readDB.QueryContext(ctx, `
-SELECT id, task_id, COALESCE(execution_id, ''), scope, check_id, description, deterministic, required, created_at
+SELECT id, task_id, COALESCE(execution_id, ''), scope, check_id, description, command, deterministic, required, created_at
 FROM pocket_validation_requirements
 WHERE task_id = ? AND (scope = 'task' OR execution_id = ?)
 ORDER BY created_at, id`, execution.TaskID, execution.ID)
@@ -669,7 +701,7 @@ ORDER BY created_at, id`, execution.TaskID, execution.ID)
 	for rows.Next() {
 		var req domain.PocketValidationRequirement
 		if err := rows.Scan(&req.ID, &req.TaskID, &req.ExecutionID, &req.Scope, &req.CheckID,
-			&req.Description, &req.Deterministic, &req.Required, &req.CreatedAt); err != nil {
+			&req.Description, &req.Command, &req.Deterministic, &req.Required, &req.CreatedAt); err != nil {
 			return nil, err
 		}
 		requirements = append(requirements, req)
