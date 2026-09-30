@@ -62,6 +62,7 @@ func validPocketValidationSource(kind domain.PocketValidationSourceKind) bool {
 	}
 }
 
+// CreatePocketTask persists a new Pocket task in AO's durable store.
 func (s *Store) CreatePocketTask(ctx context.Context, projectID domain.ProjectID, objective string, now time.Time) (domain.PocketTask, error) {
 	objective = strings.TrimSpace(objective)
 	if objective == "" {
@@ -91,6 +92,7 @@ VALUES (?, ?, ?, ?, ?, ?)`, task.ID, task.ProjectID, task.Objective, task.State,
 	return task, nil
 }
 
+// UpdatePocketTaskState updates the explicit durable lifecycle state of a Pocket task.
 func (s *Store) UpdatePocketTaskState(ctx context.Context, id string, state domain.PocketTaskState, now time.Time) (domain.PocketTask, error) {
 	if !validPocketTaskState(state) {
 		return domain.PocketTask{}, fmt.Errorf("%w: invalid task state %q", domain.ErrPocketInvalid, state)
@@ -113,6 +115,7 @@ SELECT id, project_id, objective, state, created_at, updated_at
 FROM pocket_tasks WHERE id = ?`, id))
 }
 
+// CreatePocketWorker returns or creates the durable logical worker anchored to an AO session.
 func (s *Store) CreatePocketWorker(ctx context.Context, sessionID domain.SessionID, now time.Time) (domain.PocketWorker, error) {
 	if sessionID == "" {
 		return domain.PocketWorker{}, fmt.Errorf("%w: session id is required", domain.ErrPocketInvalid)
@@ -140,6 +143,7 @@ INSERT INTO pocket_workers (id, session_id, created_at) VALUES (?, ?, ?)`,
 	return worker, nil
 }
 
+// CreatePocketExecution persists one task attempt and snapshots its AO ownership facts.
 func (s *Store) CreatePocketExecution(
 	ctx context.Context,
 	taskID, workerID, conversationID, turnID, priorExecutionID string,
@@ -282,6 +286,7 @@ INSERT INTO pocket_executions (
 	return exec, nil
 }
 
+// BindPocketExecutionTurn associates a previously created attempt with its durable AO conversation turn.
 func (s *Store) BindPocketExecutionTurn(ctx context.Context, id, conversationID, turnID string, now time.Time) (domain.PocketExecution, error) {
 	if id == "" || conversationID == "" || turnID == "" {
 		return domain.PocketExecution{}, fmt.Errorf("%w: executionId, conversationId and turnId are required", domain.ErrPocketInvalid)
@@ -352,6 +357,7 @@ WHERE id = ? AND conversation_id = '' AND turn_id = ''`,
 	return scanPocketExecution(s.writeDB.QueryRowContext(ctx, pocketExecutionSelect+" WHERE id = ?", id))
 }
 
+// UpdatePocketExecutionState advances a non-terminal attempt without rewriting a terminal outcome.
 func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state domain.PocketExecutionStateKind, now time.Time) (domain.PocketExecution, error) {
 	if !validPocketExecutionState(state) {
 		return domain.PocketExecution{}, fmt.Errorf("%w: invalid execution state %q", domain.ErrPocketInvalid, state)
@@ -405,6 +411,7 @@ func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state
 	return scanPocketExecution(s.writeDB.QueryRowContext(ctx, pocketExecutionSelect+" WHERE id = ?", id))
 }
 
+// CreatePocketValidationRequirement persists one task- or execution-scoped validation check.
 func (s *Store) CreatePocketValidationRequirement(
 	ctx context.Context,
 	taskID, executionID, checkID, description string,
@@ -468,6 +475,7 @@ VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
 	return req, nil
 }
 
+// CreatePocketValidationResult appends one timestamped validation observation with provenance.
 func (s *Store) CreatePocketValidationResult(
 	ctx context.Context,
 	executionID, requirementID string,
@@ -576,6 +584,7 @@ func scanPocketExecution(row rowScanner) (domain.PocketExecution, error) {
 	return execution, nil
 }
 
+// PocketExecutionForSession returns durable Pocket state for an AO session/turn when one exists.
 func (s *Store) PocketExecutionForSession(ctx context.Context, sessionID domain.SessionID, turnID string) (domain.PocketExecutionSnapshot, bool, error) {
 	query := pocketExecutionSelect + " WHERE session_id = ?"
 	args := []any{sessionID}
@@ -601,24 +610,8 @@ SELECT id, session_id, created_at FROM pocket_workers WHERE id = ?`, execution.W
 	if err != nil {
 		return domain.PocketExecutionSnapshot{}, false, fmt.Errorf("read pocket worker %s: %w", execution.WorkerID, err)
 	}
-	attemptRows, err := s.readDB.QueryContext(ctx, pocketExecutionSelect+" WHERE task_id = ? ORDER BY attempt_number, created_at", execution.TaskID)
+	attempts, err := s.pocketTaskAttempts(ctx, execution.TaskID)
 	if err != nil {
-		return domain.PocketExecutionSnapshot{}, false, fmt.Errorf("list pocket attempts for task %s: %w", execution.TaskID, err)
-	}
-	attempts := []domain.PocketExecution{}
-	for attemptRows.Next() {
-		attempt, scanErr := scanPocketExecution(attemptRows)
-		if scanErr != nil {
-			_ = attemptRows.Close()
-			return domain.PocketExecutionSnapshot{}, false, scanErr
-		}
-		attempts = append(attempts, attempt)
-	}
-	if err := attemptRows.Err(); err != nil {
-		_ = attemptRows.Close()
-		return domain.PocketExecutionSnapshot{}, false, err
-	}
-	if err := attemptRows.Close(); err != nil {
 		return domain.PocketExecutionSnapshot{}, false, err
 	}
 	validation, aggregate, err := s.pocketValidationForExecution(ctx, execution)
@@ -631,26 +624,97 @@ SELECT id, session_id, created_at FROM pocket_workers WHERE id = ?`, execution.W
 	}, true, nil
 }
 
-func (s *Store) pocketValidationForExecution(ctx context.Context, execution domain.PocketExecution) ([]domain.PocketValidationEvidence, domain.PocketValidationState, error) {
+func (s *Store) pocketTaskAttempts(ctx context.Context, taskID string) (attempts []domain.PocketExecution, err error) {
+	rows, err := s.readDB.QueryContext(ctx, pocketExecutionSelect+" WHERE task_id = ? ORDER BY attempt_number, created_at", taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list pocket attempts for task %s: %w", taskID, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	for rows.Next() {
+		attempt, scanErr := scanPocketExecution(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
+func (s *Store) pocketValidationRequirements(
+	ctx context.Context,
+	execution domain.PocketExecution,
+) (requirements []domain.PocketValidationRequirement, err error) {
 	rows, err := s.readDB.QueryContext(ctx, `
 SELECT id, task_id, COALESCE(execution_id, ''), scope, check_id, description, deterministic, required, created_at
 FROM pocket_validation_requirements
 WHERE task_id = ? AND (scope = 'task' OR execution_id = ?)
 ORDER BY created_at, id`, execution.TaskID, execution.ID)
 	if err != nil {
-		return nil, domain.PocketValidationUnknown, fmt.Errorf("list pocket validation requirements: %w", err)
+		return nil, fmt.Errorf("list pocket validation requirements: %w", err)
 	}
-	defer rows.Close()
-	requirements := []domain.PocketValidationRequirement{}
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
 	for rows.Next() {
 		var req domain.PocketValidationRequirement
 		if err := rows.Scan(&req.ID, &req.TaskID, &req.ExecutionID, &req.Scope, &req.CheckID,
 			&req.Description, &req.Deterministic, &req.Required, &req.CreatedAt); err != nil {
-			return nil, domain.PocketValidationUnknown, err
+			return nil, err
 		}
 		requirements = append(requirements, req)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return requirements, nil
+}
+
+func (s *Store) pocketValidationResults(
+	ctx context.Context,
+	requirementID, executionID string,
+) (results []domain.PocketValidationResult, err error) {
+	rows, err := s.readDB.QueryContext(ctx, `
+SELECT id, requirement_id, task_id, execution_id, state, source_kind, source, detail, observed_at, created_at
+FROM pocket_validation_results
+WHERE requirement_id = ? AND execution_id = ?
+ORDER BY observed_at DESC, created_at DESC, id DESC`, requirementID, executionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	for rows.Next() {
+		var result domain.PocketValidationResult
+		if err := rows.Scan(&result.ID, &result.RequirementID, &result.TaskID, &result.ExecutionID,
+			&result.State, &result.SourceKind, &result.Source, &result.Detail, &result.ObservedAt, &result.CreatedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func (s *Store) pocketValidationForExecution(ctx context.Context, execution domain.PocketExecution) ([]domain.PocketValidationEvidence, domain.PocketValidationState, error) {
+	requirements, err := s.pocketValidationRequirements(ctx, execution)
+	if err != nil {
 		return nil, domain.PocketValidationUnknown, err
 	}
 
@@ -659,32 +723,17 @@ ORDER BY created_at, id`, execution.TaskID, execution.ID)
 	requiredSeen := false
 	requiredUnknown := false
 	for _, req := range requirements {
-		resultRows, err := s.readDB.QueryContext(ctx, `
-SELECT id, requirement_id, task_id, execution_id, state, source_kind, source, detail, observed_at, created_at
-FROM pocket_validation_results
-WHERE requirement_id = ? AND execution_id = ?
-ORDER BY observed_at DESC, created_at DESC, id DESC`, req.ID, execution.ID)
+		results, err := s.pocketValidationResults(ctx, req.ID, execution.ID)
 		if err != nil {
-			return nil, domain.PocketValidationUnknown, err
+			return nil, domain.PocketValidationUnknown, fmt.Errorf("list pocket validation results for %s: %w", req.ID, err)
 		}
-		results := []domain.PocketValidationResult{}
 		effective := domain.PocketValidationUnknown
 		effectiveSet := false
-		for resultRows.Next() {
-			var result domain.PocketValidationResult
-			if err := resultRows.Scan(&result.ID, &result.RequirementID, &result.TaskID, &result.ExecutionID,
-				&result.State, &result.SourceKind, &result.Source, &result.Detail, &result.ObservedAt, &result.CreatedAt); err != nil {
-				_ = resultRows.Close()
-				return nil, domain.PocketValidationUnknown, err
-			}
-			results = append(results, result)
+		for _, result := range results {
 			if !effectiveSet && (!req.Deterministic || result.SourceKind == domain.PocketValidationDeterministic) {
 				effective = result.State
 				effectiveSet = true
 			}
-		}
-		if err := resultRows.Close(); err != nil {
-			return nil, domain.PocketValidationUnknown, err
 		}
 		evidence = append(evidence, domain.PocketValidationEvidence{
 			Requirement: req, EffectiveState: effective, Results: results,
@@ -702,6 +751,8 @@ ORDER BY observed_at DESC, created_at DESC, id DESC`, req.ID, execution.ID)
 			if aggregate != domain.PocketValidationFail {
 				aggregate = domain.PocketValidationPass
 			}
+		default:
+			requiredUnknown = true
 		}
 	}
 	if !requiredSeen || (aggregate != domain.PocketValidationFail && requiredUnknown) {
