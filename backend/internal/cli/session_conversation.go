@@ -14,31 +14,31 @@ import (
 // paginated, so fetchConversationSnapshot reconstructs the complete active
 // conversation before returning this value.
 type conversationSnapshotDTO struct {
-	ConversationID string                   `json:"conversationId"`
-	ActiveBranchID string                   `json:"activeBranchId,omitempty"`
-	SessionID      string                   `json:"sessionId"`
-	Harness        string                   `json:"harness,omitempty"`
-	Mode           string                   `json:"mode"`
-	Controller     string                   `json:"controller"`
-	Title          string                   `json:"title,omitempty"`
-	LatestSequence int64                    `json:"latestSequence"`
-	OldestSequence int64                    `json:"oldestSequence,omitempty"`
-	HasMoreBefore  bool                     `json:"hasMoreBefore"`
-	Turns          []conversationTurnDTO     `json:"turns"`
-	Messages       []conversationMessageDTO  `json:"messages"`
+	ConversationID string `json:"conversationId"`
+	ActiveBranchID string `json:"activeBranchId,omitempty"`
+	SessionID      string `json:"sessionId"`
+	Harness        string `json:"harness,omitempty"`
+	Mode           string `json:"mode"`
+	Controller     string `json:"controller"`
+	Title          string `json:"title,omitempty"`
+	LatestSequence int64  `json:"latestSequence"`
+	OldestSequence int64  `json:"oldestSequence,omitempty"`
+	HasMoreBefore  bool   `json:"hasMoreBefore"`
+	Turns          []conversationTurnDTO `json:"turns"`
+	Messages       []conversationMessageDTO `json:"messages"`
 	Activities     []conversationActivityDTO `json:"activities"`
 }
 
 type conversationTurnDTO struct {
-	ID              string                   `json:"id"`
-	State           string                   `json:"state"`
-	RetryOfTurnID   string                   `json:"retryOfTurnId,omitempty"`
-	HasRetryAttempt bool                     `json:"hasRetryAttempt,omitempty"`
-	ErrorMessage    string                   `json:"errorMessage,omitempty"`
-	RequestedAt     string                   `json:"requestedAt"`
-	StartedAt       *string                  `json:"startedAt,omitempty"`
-	CompletedAt     *string                  `json:"completedAt,omitempty"`
-	RolledBack      bool                     `json:"rolledBack,omitempty"`
+	ID              string `json:"id"`
+	State           string `json:"state"`
+	RetryOfTurnID   string `json:"retryOfTurnId,omitempty"`
+	HasRetryAttempt bool   `json:"hasRetryAttempt,omitempty"`
+	ErrorMessage    string `json:"errorMessage,omitempty"`
+	RequestedAt     string `json:"requestedAt"`
+	StartedAt       *string `json:"startedAt,omitempty"`
+	CompletedAt     *string `json:"completedAt,omitempty"`
+	RolledBack      bool    `json:"rolledBack,omitempty"`
 	Diff            *conversationTurnDiffDTO `json:"diff,omitempty"`
 }
 
