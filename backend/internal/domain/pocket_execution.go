@@ -143,7 +143,6 @@ type PocketValidationEvidence struct {
 	Results        []PocketValidationResult    `json:"results"`
 }
 
-// PocketExecutionSnapshot is the durable task/worker/attempt/validation view for a session execution.
 // PocketValidationWorkItem is one deterministic requirement ready to execute
 // against the AO worktree snapshotted by its execution attempt.
 type PocketValidationWorkItem struct {
@@ -151,6 +150,7 @@ type PocketValidationWorkItem struct {
 	Requirement PocketValidationRequirement `json:"requirement"`
 }
 
+// PocketExecutionSnapshot is the durable task/worker/attempt/validation view for a session execution.
 type PocketExecutionSnapshot struct {
 	Task            PocketTask                 `json:"task"`
 	Worker          PocketWorker               `json:"worker"`
