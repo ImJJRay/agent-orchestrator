@@ -165,12 +165,12 @@ func (c *Coordinator) validationLoop(ctx context.Context) {
 }
 
 type validationDetail struct {
-	Command    string `json:"command,omitempty"`
-	Worktree   string `json:"worktree,omitempty"`
-	ExitCode   *int   `json:"exitCode,omitempty"`
-	Output     string `json:"output,omitempty"`
+	Command     string `json:"command,omitempty"`
+	Worktree    string `json:"worktree,omitempty"`
+	ExitCode    *int   `json:"exitCode,omitempty"`
+	Output      string `json:"output,omitempty"`
 	Unavailable string `json:"unavailable,omitempty"`
-	DurationMS int64  `json:"durationMs"`
+	DurationMS  int64  `json:"durationMs"`
 }
 
 func boundedValidationOutput(output []byte) string {
