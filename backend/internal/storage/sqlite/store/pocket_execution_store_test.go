@@ -67,9 +67,13 @@ func TestPocketExecutionStateSurvivesReopenWithRetryAndValidationEvidence(t *tes
 		t.Fatal(err)
 	}
 	first, err := s.CreatePocketExecution(
-		ctx, task.ID, worker.ID, fixture.convID, fixture.turn1, "",
+		ctx, task.ID, worker.ID, "", "", "",
 		domain.PocketExecutionUnknown, base,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err = s.BindPocketExecutionTurn(ctx, first.ID, fixture.convID, fixture.turn1, base.Add(30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +82,13 @@ func TestPocketExecutionStateSurvivesReopenWithRetryAndValidationEvidence(t *tes
 		t.Fatal(err)
 	}
 	second, err := s.CreatePocketExecution(
-		ctx, task.ID, worker.ID, fixture.convID, fixture.turn2, first.ID,
+		ctx, task.ID, worker.ID, "", "", first.ID,
 		domain.PocketExecutionUnknown, base.Add(2*time.Minute),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err = s.BindPocketExecutionTurn(ctx, second.ID, fixture.convID, fixture.turn2, base.Add(150*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +244,36 @@ func TestPocketDeterministicValidationCannotBeOverriddenBySemanticEvidence(t *te
 	}
 	// Only newer authoritative deterministic evidence changes the outcome.
 	assertState(domain.PocketValidationPass)
+}
+
+func TestPocketTerminalExecutionStateIsImmutable(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fixture := seedPocketFixture(t, s)
+	now := time.Now().UTC()
+	task, err := s.CreatePocketTask(ctx, fixture.session.ProjectID, "immutable attempt", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := s.CreatePocketWorker(ctx, fixture.session.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := s.CreatePocketExecution(ctx, task.ID, worker.ID, fixture.convID, fixture.turn1, "", domain.PocketExecutionUnknown, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err = s.UpdatePocketExecutionState(ctx, execution.ID, domain.PocketExecutionFailed, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdatePocketExecutionState(ctx, execution.ID, domain.PocketExecutionCompleted, now.Add(2*time.Second)); err == nil {
+		t.Fatal("terminal failure was rewritten as completion")
+	}
+	same, err := s.UpdatePocketExecutionState(ctx, execution.ID, domain.PocketExecutionFailed, now.Add(3*time.Second))
+	if err != nil || same.State != domain.PocketExecutionFailed {
+		t.Fatalf("idempotent terminal update = %#v, err=%v", same, err)
+	}
 }
 
 func TestPocketRetryMustMatchDurableAOTurnLineage(t *testing.T) {
