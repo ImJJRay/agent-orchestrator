@@ -506,12 +506,28 @@ SELECT id, session_id, created_at FROM pocket_workers WHERE id = ?`, execution.W
 	if err != nil {
 		return domain.PocketExecutionSnapshot{}, false, fmt.Errorf("read pocket worker %s: %w", execution.WorkerID, err)
 	}
+	attemptRows, err := s.readDB.QueryContext(ctx, pocketExecutionSelect+" WHERE task_id = ? ORDER BY attempt_number, created_at", execution.TaskID)
+	if err != nil {
+		return domain.PocketExecutionSnapshot{}, false, fmt.Errorf("list pocket attempts for task %s: %w", execution.TaskID, err)
+	}
+	attempts := []domain.PocketExecution{}
+	for attemptRows.Next() {
+		attempt, scanErr := scanPocketExecution(attemptRows)
+		if scanErr != nil {
+			_ = attemptRows.Close()
+			return domain.PocketExecutionSnapshot{}, false, scanErr
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := attemptRows.Close(); err != nil {
+		return domain.PocketExecutionSnapshot{}, false, err
+	}
 	validation, aggregate, err := s.pocketValidationForExecution(ctx, execution)
 	if err != nil {
 		return domain.PocketExecutionSnapshot{}, false, err
 	}
 	return domain.PocketExecutionSnapshot{
-		Task: task, Worker: worker, Execution: execution,
+		Task: task, Worker: worker, Execution: execution, Attempts: attempts,
 		ValidationState: aggregate, Validation: validation,
 	}, true, nil
 }
