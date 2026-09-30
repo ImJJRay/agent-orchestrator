@@ -541,8 +541,8 @@ type PocketExecution struct {
 }
 
 type PocketLifecycleState struct {
-	Singleton             int64
-	AutomationStartedAt   time.Time
+	Singleton           int64
+	AutomationStartedAt time.Time
 }
 
 type PocketTask struct {
@@ -561,10 +561,10 @@ type PocketValidationRequirement struct {
 	Scope         string
 	CheckID       string
 	Description   string
-	Command       string
 	Deterministic bool
 	Required      bool
 	CreatedAt     time.Time
+	Command       string
 }
 
 type PocketValidationResult struct {
