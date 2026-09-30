@@ -252,7 +252,9 @@ func deterministicValidationState(evidence []domain.PocketValidationEvidence) do
 		switch item.EffectiveState {
 		case domain.PocketValidationFail:
 			return domain.PocketValidationFail
-		case domain.PocketValidationUnknown:
+		case domain.PocketValidationPass:
+			// Authoritative pass evidence exists for this required check.
+		default:
 			unknown = true
 		}
 	}
