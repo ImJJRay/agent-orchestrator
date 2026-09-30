@@ -120,14 +120,14 @@ type PocketValidationResult struct {
 type PocketValidationEvidence struct {
 	Requirement    PocketValidationRequirement `json:"requirement"`
 	EffectiveState PocketValidationState       `json:"effectiveState"`
-	Results        []PocketValidationResult     `json:"results"`
+	Results        []PocketValidationResult    `json:"results"`
 }
 
 type PocketExecutionSnapshot struct {
 	Task            PocketTask                 `json:"task"`
 	Worker          PocketWorker               `json:"worker"`
 	Execution       PocketExecution            `json:"execution"`
-	Attempts        []PocketExecution           `json:"attempts"`
+	Attempts        []PocketExecution          `json:"attempts"`
 	ValidationState PocketValidationState      `json:"validationState"`
 	Validation      []PocketValidationEvidence `json:"validation"`
 }
