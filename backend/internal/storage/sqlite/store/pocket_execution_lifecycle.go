@@ -209,14 +209,18 @@ func (s *Store) ensurePocketExecutionForTurnTx(
 		return domain.PocketExecution{}, false, err
 	}
 	var projectID, workspacePath, workspaceRepoPath string
+	var sessionKind domain.SessionKind
 	if err := tx.QueryRowContext(ctx, `
-SELECT project_id, workspace_path, workspace_repo_path
+SELECT project_id, workspace_path, workspace_repo_path, kind
 FROM sessions
-WHERE id = ?`, fact.SessionID).Scan(&projectID, &workspacePath, &workspaceRepoPath); err != nil {
+WHERE id = ?`, fact.SessionID).Scan(&projectID, &workspacePath, &workspaceRepoPath, &sessionKind); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.PocketExecution{}, false, fmt.Errorf("%w: session %s", domain.ErrPocketNotFound, fact.SessionID)
 		}
 		return domain.PocketExecution{}, false, fmt.Errorf("read session %s for Pocket lifecycle: %w", fact.SessionID, err)
+	}
+	if sessionKind != domain.KindWorker {
+		return domain.PocketExecution{}, false, fmt.Errorf("%w: session %s kind %q is not Pocket worker execution", domain.ErrPocketInvalid, fact.SessionID, sessionKind)
 	}
 
 	worker, err := s.ensurePocketWorkerTx(ctx, tx, fact.SessionID, fact.RequestedAt)
@@ -349,6 +353,9 @@ JOIN conversation_messages m
  AND m.role = 'user'
 JOIN pocket_lifecycle_state lifecycle
   ON lifecycle.singleton = 1
+JOIN sessions session
+  ON session.id = t.handled_by_session_id
+ AND session.kind = 'worker'
 LEFT JOIN pocket_executions execution
   ON execution.turn_id = t.id
 WHERE execution.id IS NULL
