@@ -71,11 +71,11 @@ type createPocketWorkerRequest struct {
 }
 
 type createPocketExecutionRequest struct {
-	WorkerID          string                          `json:"workerId"`
-	ConversationID    string                          `json:"conversationId"`
-	TurnID            string                          `json:"turnId"`
-	PriorExecutionID  string                          `json:"priorExecutionId"`
-	State             domain.PocketExecutionStateKind `json:"state"`
+	WorkerID         string                          `json:"workerId"`
+	ConversationID   string                          `json:"conversationId"`
+	TurnID           string                          `json:"turnId"`
+	PriorExecutionID string                          `json:"priorExecutionId"`
+	State            domain.PocketExecutionStateKind `json:"state"`
 }
 
 type bindPocketExecutionTurnRequest struct {
