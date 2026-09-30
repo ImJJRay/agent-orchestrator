@@ -959,7 +959,7 @@ func Run() error {
 		}()
 	}
 
-	pocketDone := pocketCoordinator.Start(ctx)
+	var pocketDone <-chan struct{}
 	var startupReconcileDone <-chan struct{}
 	runErr := srv.RunWithReady(ctx, func() {
 		// Agent-readiness warming is advisory and idempotent, and request paths
@@ -986,6 +986,11 @@ func Run() error {
 			if reconcileErr := pocketCoordinator.Reconcile(ctx); reconcileErr != nil {
 				log.Error("Pocket execution reconciliation on boot failed", "err", reconcileErr)
 			}
+			// Periodic projection/validation starts only after AO recovery and this
+			// initial Pocket projection have completed. The startupReconcileDone close
+			// publishes pocketDone to the shutdown path without another synchronization
+			// primitive.
+			pocketDone = pocketCoordinator.Start(ctx)
 		}()
 	})
 
@@ -1015,7 +1020,9 @@ func Run() error {
 	if startupReconcileDone != nil {
 		<-startupReconcileDone
 	}
-	<-pocketDone
+	if pocketDone != nil {
+		<-pocketDone
+	}
 	backgroundStopCtx, backgroundStopCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	if err := sessMgr.WaitBackgroundWorkers(backgroundStopCtx); err != nil {
 		log.Error("session background worker shutdown", "err", err)
