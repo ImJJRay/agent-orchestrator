@@ -533,6 +533,41 @@ type PRURLAlias struct {
 	CanonicalURL string
 }
 
+type PocketAction struct {
+	DecisionID  string
+	ExecutionID string
+	TaskID      string
+	SessionID   string
+	PriorTurnID string
+	NativeRetry bool
+	Prompt      string
+	Kind        string
+	Status      string
+	Error       string
+}
+
+type PocketActionEvent struct {
+	Sequence   int64
+	DecisionID string
+	Status     string
+	Detail     string
+	CreatedAt  time.Time
+}
+
+type PocketDecision struct {
+	ID          string
+	TaskID      string
+	Fingerprint string
+	FactsJson   string
+	OutcomeJson string
+	CreatedAt   time.Time
+}
+
+type PocketDependency struct {
+	TaskID       string
+	DependencyID string
+}
+
 type PocketExecution struct {
 	ID                string
 	TaskID            string
@@ -555,6 +590,12 @@ type PocketExecution struct {
 type PocketLifecycleState struct {
 	Singleton           int64
 	AutomationStartedAt time.Time
+}
+
+type PocketPolicyConfig struct {
+	TaskID     string
+	ConfigJson string
+	Revision   int64
 }
 
 type PocketTask struct {

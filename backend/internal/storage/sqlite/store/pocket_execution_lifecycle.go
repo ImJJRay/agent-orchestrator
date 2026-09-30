@@ -183,6 +183,15 @@ func (s *Store) ensurePocketExecutionForTurnTx(
 	now time.Time,
 	visiting map[string]bool,
 ) (domain.PocketExecution, bool, error) {
+	// Bind reservations before generic projection, closing the dispatch race.
+	action, actionErr := scanPocketAction(tx.QueryRowContext(ctx, pocketActionSelect+` WHERE (session_id=(SELECT handled_by_session_id FROM conversation_turns WHERE id=?) OR prior_turn_id IN (SELECT retry_of_turn_id FROM conversation_turns WHERE id=?)) AND ((prior_turn_id=(SELECT retry_of_turn_id FROM conversation_turns WHERE id=?)) OR EXISTS (SELECT 1 FROM conversation_messages m WHERE m.turn_id=? AND m.client_message_id='pocket:' || pocket_actions.decision_id)) LIMIT 1`, turnID, turnID, turnID, turnID))
+	if actionErr == nil {
+		if _, err := s.bindPocketActionTx(ctx, tx, action); err != nil {
+			return domain.PocketExecution{}, false, err
+		}
+	} else if !errors.Is(actionErr, sql.ErrNoRows) {
+		return domain.PocketExecution{}, false, actionErr
+	}
 	var existingID string
 	err := tx.QueryRowContext(ctx,
 		`SELECT id FROM pocket_executions WHERE turn_id = ? LIMIT 1`,
@@ -235,6 +244,12 @@ WHERE id = ?`, fact.SessionID).Scan(&projectID, &workspacePath, &workspaceRepoPa
 		prior, _, err := s.ensurePocketExecutionForTurnTx(ctx, tx, fact.RetryOfTurnID, now, visiting)
 		if err != nil {
 			return domain.PocketExecution{}, false, fmt.Errorf("ensure prior Pocket attempt for retry %s: %w", fact.ID, err)
+		}
+		var occupied string
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM pocket_executions WHERE prior_execution_id=? AND turn_id<>?", prior.ID, fact.ID).Scan(&occupied); err == nil {
+			return domain.PocketExecution{}, false, fmt.Errorf("%w: concurrent AO retry requires human reconciliation", domain.ErrPocketInvalid)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return domain.PocketExecution{}, false, err
 		}
 		taskID = prior.TaskID
 		priorExecutionID = prior.ID

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
@@ -46,6 +47,7 @@ type Store interface {
 
 // Options configures the Pocket coordinator.
 type Options struct {
+	Executor           Executor
 	Store              Store
 	Logger             *slog.Logger
 	Clock              func() time.Time
@@ -55,9 +57,13 @@ type Options struct {
 }
 
 // Coordinator keeps Pocket projection eventually consistent with AO durable
-// facts and executes deterministic checks. It never launches coding workers,
-// changes task acceptance, or authorizes Git operations.
+// facts, executes deterministic checks and actuates authorized Chat work. It
+// never accepts tasks or authorizes Git operations.
 type Coordinator struct {
+	executor           Executor
+	actionMu           sync.Mutex
+	recoveryMu         sync.Mutex
+	recovered          bool
 	store              Store
 	log                *slog.Logger
 	now                func() time.Time
@@ -90,6 +96,7 @@ func New(opts Options) *Coordinator {
 	}
 	return &Coordinator{
 		store:              opts.Store,
+		executor:           opts.Executor,
 		log:                log,
 		now:                now,
 		reconcileInterval:  reconcileInterval,
@@ -105,7 +112,27 @@ func (c *Coordinator) Reconcile(ctx context.Context) error {
 	if c == nil || c.store == nil {
 		return nil
 	}
-	return c.store.ReconcilePocketExecutionLifecycle(ctx, c.now().UTC())
+	if orchestration, ok := c.store.(OrchestrationStore); ok {
+		c.recoveryMu.Lock()
+		if !c.recovered {
+			if err := orchestration.RecoverPocketActions(ctx); err != nil {
+				c.recoveryMu.Unlock()
+				return err
+			}
+			c.recovered = true
+		}
+		c.recoveryMu.Unlock()
+		if err := orchestration.ReconcilePocketActions(ctx); err != nil {
+			return err
+		}
+	}
+	if err := c.store.ReconcilePocketExecutionLifecycle(ctx, c.now().UTC()); err != nil {
+		return err
+	}
+	if orchestration, ok := c.store.(OrchestrationStore); ok {
+		return orchestration.ReconcilePocketPolicy(ctx, c.now().UTC())
+	}
+	return nil
 }
 
 // Start launches independent state and validation loops. Validation command
@@ -118,7 +145,7 @@ func (c *Coordinator) Start(ctx context.Context) <-chan struct{} {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		c.reconcileLoop(ctx)
@@ -126,6 +153,21 @@ func (c *Coordinator) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer wg.Done()
 		c.validationLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(c.reconcileInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.RunPendingAction(ctx); err != nil && ctx.Err() == nil {
+					c.log.Warn("Pocket action failed", "err", err)
+				}
+			}
+		}
 	}()
 	go func() {
 		wg.Wait()
@@ -310,4 +352,54 @@ func (c *Coordinator) RunPendingValidation(ctx context.Context) error {
 		now,
 	)
 	return err
+}
+
+// Executor is AO's existing durable Chat control plane, not a Pocket worker runtime.
+type Executor interface {
+	SendPolicy(context.Context, domain.SessionID, ports.ChatUserMessage) (domain.ConversationTurn, error)
+	RetryPolicy(context.Context, domain.SessionID, string) (domain.ConversationTurn, error)
+}
+
+// OrchestrationStore persists policy decisions and outbox reservations in AO SQLite.
+type OrchestrationStore interface {
+	RecoverPocketActions(context.Context) error
+	ReconcilePocketActions(context.Context) error
+	ReconcilePocketPolicy(context.Context, time.Time) error
+	ClaimPocketAction(context.Context, time.Time) (domain.PocketAction, bool, error)
+	SettlePocketAction(context.Context, domain.PocketAction, error) error
+}
+
+// RunPendingAction executes one reserved decision. Stable message identity and
+// AO's native retry uniqueness protect both uncertain round trips and restarts.
+func (c *Coordinator) RunPendingAction(ctx context.Context) error {
+	if c == nil || c.executor == nil {
+		return nil
+	}
+	s, ok := c.store.(OrchestrationStore)
+	if !ok {
+		return nil
+	}
+	c.actionMu.Lock()
+	defer c.actionMu.Unlock()
+	c.recoveryMu.Lock()
+	if !c.recovered {
+		if err := s.RecoverPocketActions(ctx); err != nil {
+			c.recoveryMu.Unlock()
+			return err
+		}
+		c.recovered = true
+	}
+	c.recoveryMu.Unlock()
+	a, found, err := s.ClaimPocketAction(ctx, c.now().UTC())
+	if err != nil || !found {
+		return err
+	}
+	if a.NativeRetry {
+		_, err = c.executor.RetryPolicy(ctx, a.SessionID, a.PriorTurnID)
+	} else {
+		_, err = c.executor.SendPolicy(ctx, a.SessionID, ports.ChatUserMessage{Text: a.Prompt, Origin: domain.MessageOriginAutomation, ClientMessageID: "pocket:" + a.DecisionID})
+	}
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return errors.Join(err, s.SettlePocketAction(settleCtx, a, err))
 }

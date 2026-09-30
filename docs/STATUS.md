@@ -1,5 +1,10 @@
 # agent-orchestrator status
 
+Pocket fork implementation status is maintained in [pocket-agent/STATUS.md](pocket-agent/STATUS.md).
+The current Pocket increment adds deterministic DAG policy, budgets, audited actuation
+and crash recovery; JEV and intelligent routing remain deferred.
+
+
 Current `main` ships a working single-user local loop: the Go daemon and the
 Electron/React frontend both drive a live daemon over HTTP/SSE/WebSocket. The
 core GitHub flow works end-to-end: add project → spawn session/orchestrator →

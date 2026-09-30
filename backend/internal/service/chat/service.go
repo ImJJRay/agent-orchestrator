@@ -1101,6 +1101,22 @@ func (s *Service) Send(
 	return turn, nil
 }
 
+// SendPolicy uses AO's normal persistence/dispatch with fail-closed idle admission.
+func (s *Service) SendPolicy(ctx context.Context, id domain.SessionID, msg ports.ChatUserMessage) (domain.ConversationTurn, error) {
+	record, err := s.requireChatSession(ctx, id)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	if record.IsTerminated || record.ProvisionState.WithDefault() != domain.SessionProvisionReady {
+		return domain.ConversationTurn{}, domain.ErrPocketAdmissionBlocked
+	}
+	controller, err := s.Controller(id)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	return controller.SendPolicy(ctx, msg)
+}
+
 // SendForOwner sends a user message to an owner-specific chat controller.
 func (s *Service) SendForOwner(ctx context.Context, owner domain.ConversationOwner, msg ports.ChatUserMessage) (domain.ConversationTurn, error) {
 	controller, err := s.ControllerForOwner(owner)
@@ -2158,4 +2174,20 @@ func openCodeApprovalTier(value string) (domain.PermissionMode, string, bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// RetryPolicy uses AO's native durable retry with idle policy admission.
+func (s *Service) RetryPolicy(ctx context.Context, id domain.SessionID, turnID string) (domain.ConversationTurn, error) {
+	record, err := s.requireChatSession(ctx, id)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	if record.IsTerminated || record.ProvisionState.WithDefault() != domain.SessionProvisionReady {
+		return domain.ConversationTurn{}, domain.ErrPocketAdmissionBlocked
+	}
+	controller, err := s.Controller(id)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	return controller.RetryPolicy(ctx, turnID)
 }

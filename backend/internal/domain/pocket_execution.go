@@ -6,6 +6,8 @@ import (
 )
 
 var (
+	// ErrPocketAdmissionBlocked is AO proof that policy work was refused before delivery.
+	ErrPocketAdmissionBlocked = errors.New("pocket action admission blocked")
 	// ErrPocketNotFound reports a missing Pocket durable-state record.
 	ErrPocketNotFound = errors.New("pocket state not found")
 	// ErrPocketConflict reports an incompatible or duplicate Pocket state transition.

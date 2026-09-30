@@ -321,3 +321,9 @@ NULL configs retain their defaults. No Git discovery runs during migration, and
 no earlier migration is modified. Downgrading preserves config data; older
 versions do not support canonical claims and may drop this field when saving
 project settings.
+
+Pocket's fork-specific deterministic policy is visible through
+`ao pocket policy <task-id> [--json]` and
+`ao pocket decisions <task-id> [--json] [--before <sequence>]`.
+These are thin clients of the loopback-only Pocket endpoints. Configuration,
+DAG and recovery semantics are documented in [Pocket orchestration](../pocket-agent/ORCHESTRATION.md).
