@@ -92,6 +92,7 @@ type createPocketValidationRequirementRequest struct {
 	Scope         domain.PocketValidationScope `json:"scope"`
 	CheckID       string                       `json:"checkId"`
 	Description   string                       `json:"description"`
+	Command       string                       `json:"command"`
 	Deterministic *bool                        `json:"deterministic"`
 	Required      *bool                        `json:"required"`
 }
@@ -212,10 +213,29 @@ func (c *PocketStateController) createValidationRequirement(w http.ResponseWrite
 	if req.Required != nil {
 		required = *req.Required
 	}
-	requirement, err := c.Svc.CreatePocketValidationRequirement(
-		r.Context(), chi.URLParam(r, "taskId"), req.ExecutionID, req.CheckID, req.Description,
-		req.Scope, deterministic, required, c.now(),
-	)
+	var requirement domain.PocketValidationRequirement
+	var err error
+	if strings.TrimSpace(req.Command) != "" {
+		commandSvc, ok := c.Svc.(interface {
+			CreatePocketValidationCommandRequirement(
+				context.Context, string, string, string, string, string,
+				domain.PocketValidationScope, bool, bool, time.Time,
+			) (domain.PocketValidationRequirement, error)
+		})
+		if !ok {
+			writePocketError(w, r, errors.New("pocket validation command service unavailable"))
+			return
+		}
+		requirement, err = commandSvc.CreatePocketValidationCommandRequirement(
+			r.Context(), chi.URLParam(r, "taskId"), req.ExecutionID, req.CheckID, req.Description,
+			req.Command, req.Scope, deterministic, required, c.now(),
+		)
+	} else {
+		requirement, err = c.Svc.CreatePocketValidationRequirement(
+			r.Context(), chi.URLParam(r, "taskId"), req.ExecutionID, req.CheckID, req.Description,
+			req.Scope, deterministic, required, c.now(),
+		)
+	}
 	if err != nil {
 		writePocketError(w, r, err)
 		return
