@@ -383,7 +383,6 @@ func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state
 		query = `UPDATE pocket_executions SET state = ?, updated_at = ? WHERE id = ?`
 	}
 	var res sql.Result
-	var err error
 	switch state {
 	case domain.PocketExecutionRunning:
 		res, err = s.writeDB.ExecContext(ctx, query, state, now, now, id)
@@ -615,6 +614,10 @@ SELECT id, session_id, created_at FROM pocket_workers WHERE id = ?`, execution.W
 		}
 		attempts = append(attempts, attempt)
 	}
+	if err := attemptRows.Err(); err != nil {
+		_ = attemptRows.Close()
+		return domain.PocketExecutionSnapshot{}, false, err
+	}
 	if err := attemptRows.Close(); err != nil {
 		return domain.PocketExecutionSnapshot{}, false, err
 	}
@@ -666,6 +669,7 @@ ORDER BY observed_at DESC, created_at DESC, id DESC`, req.ID, execution.ID)
 		}
 		results := []domain.PocketValidationResult{}
 		effective := domain.PocketValidationUnknown
+		effectiveSet := false
 		for resultRows.Next() {
 			var result domain.PocketValidationResult
 			if err := resultRows.Scan(&result.ID, &result.RequirementID, &result.TaskID, &result.ExecutionID,
@@ -674,10 +678,9 @@ ORDER BY observed_at DESC, created_at DESC, id DESC`, req.ID, execution.ID)
 				return nil, domain.PocketValidationUnknown, err
 			}
 			results = append(results, result)
-			if effective == domain.PocketValidationUnknown {
-				if !req.Deterministic || result.SourceKind == domain.PocketValidationDeterministic {
-					effective = result.State
-				}
+			if !effectiveSet && (!req.Deterministic || result.SourceKind == domain.PocketValidationDeterministic) {
+				effective = result.State
+				effectiveSet = true
 			}
 		}
 		if err := resultRows.Close(); err != nil {
