@@ -1,0 +1,29 @@
+name: Pocket PR Fast Validation
+
+on:
+  push:
+    branches:
+      - feature/pocket-execution-policy-20260930-0144
+
+permissions:
+  contents: read
+
+jobs:
+  backend-fast:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Full backend tests without race detector
+        run: go test -count=1 -timeout=10m ./...
+
+      - name: Race tests for affected CLI package
+        run: go test -race -count=1 -timeout=10m ./internal/cli/...
