@@ -29,8 +29,10 @@ const (
 	PocketExecutionQueued      PocketExecutionStateKind = "queued"
 	PocketExecutionRunning     PocketExecutionStateKind = "running"
 	PocketExecutionCompleted   PocketExecutionStateKind = "completed"
+	PocketExecutionRecovered   PocketExecutionStateKind = "recovered"
 	PocketExecutionFailed      PocketExecutionStateKind = "failed"
 	PocketExecutionInterrupted PocketExecutionStateKind = "interrupted"
+	PocketExecutionCancelled   PocketExecutionStateKind = "cancelled"
 )
 
 type PocketValidationScope string
