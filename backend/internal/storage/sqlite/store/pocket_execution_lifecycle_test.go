@@ -390,4 +390,3 @@ func TestPocketLifecycleDoesNotProjectOrchestratorConversation(t *testing.T) {
 		t.Fatalf("orchestrator turn must not become worker execution: ok=%v err=%v", ok, err)
 	}
 }
-
