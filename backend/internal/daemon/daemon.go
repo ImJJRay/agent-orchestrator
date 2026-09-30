@@ -44,6 +44,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/sentryobs"
 	usagepipeline "github.com/aoagents/agent-orchestrator/backend/internal/observe/usage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	pocketsvc "github.com/aoagents/agent-orchestrator/backend/internal/pocket"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
@@ -295,6 +296,7 @@ func Run() error {
 	// graceful shutdown inside Server.Run and stops the background goroutines.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	pocketCoordinator := pocketsvc.New(pocketsvc.Options{Store: store, Logger: log})
 	policyCoordinator.StartWatcher(ctx)
 	defer func() { _ = policyCoordinator.CloseAndDrain(context.Background()) }()
 	// Constructing the synchronous sender performs no I/O. The hard production
@@ -957,6 +959,7 @@ func Run() error {
 		}()
 	}
 
+	pocketDone := pocketCoordinator.Start(ctx)
 	var startupReconcileDone <-chan struct{}
 	runErr := srv.RunWithReady(ctx, func() {
 		// Agent-readiness warming is advisory and idempotent, and request paths
@@ -976,6 +979,12 @@ func Run() error {
 			}
 			if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
 				log.Error("background agent-process reconciliation on boot failed", "err", reconcileErr)
+			}
+			// Pocket is a projection of AO's durable facts. Reconcile it only after
+			// AO has adopted/settled runtime and Chat state so stale in-flight attempts
+			// cannot survive a daemon restart as false "running" executions.
+			if reconcileErr := pocketCoordinator.Reconcile(ctx); reconcileErr != nil {
+				log.Error("Pocket execution reconciliation on boot failed", "err", reconcileErr)
 			}
 		}()
 	})
@@ -1006,6 +1015,7 @@ func Run() error {
 	if startupReconcileDone != nil {
 		<-startupReconcileDone
 	}
+	<-pocketDone
 	backgroundStopCtx, backgroundStopCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	if err := sessMgr.WaitBackgroundWorkers(backgroundStopCtx); err != nil {
 		log.Error("session background worker shutdown", "err", err)
