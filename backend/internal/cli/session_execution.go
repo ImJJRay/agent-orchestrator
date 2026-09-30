@@ -116,6 +116,7 @@ type sessionExecutionOutput struct {
 	Task             *domain.PocketTask         `json:"task,omitempty"`
 	Worker           *domain.PocketWorker       `json:"worker,omitempty"`
 	DurableExecution *domain.PocketExecution    `json:"durableExecution,omitempty"`
+	Attempts         []domain.PocketExecution   `json:"attempts,omitempty"`
 	Validation       *executionValidationOutput `json:"validation,omitempty"`
 	Execution        *executionTurnOutput       `json:"execution"`
 	Profile          executionProfileOutput     `json:"profile"`
@@ -208,6 +209,7 @@ func applyDurablePocketState(out *sessionExecutionOutput, snapshot domain.Pocket
 	out.Task = &task
 	out.Worker = &worker
 	out.DurableExecution = &execution
+	out.Attempts = snapshot.Attempts
 	out.Validation = &executionValidationOutput{
 		State:    snapshot.ValidationState,
 		Evidence: snapshot.Validation,
