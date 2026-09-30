@@ -354,3 +354,40 @@ func TestPocketAutomaticExecutionFeedsDeterministicValidationQueue(t *testing.T)
 	}
 }
 
+func TestPocketLifecycleDoesNotProjectOrchestratorConversation(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedProject(t, s, "orchestrator-pocket")
+	rec := sampleRecord("orchestrator-pocket")
+	rec.Kind = domain.KindOrchestrator
+	rec.Mode = domain.SessionModeChat
+	session, err := s.CreateSession(ctx, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(time.Minute)
+	conv, err := s.CreateConversation(
+		ctx,
+		"orchestrator-pocket-conv",
+		domain.ConversationScopeSession,
+		session.ProjectID,
+		session.ID,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := s.AppendUserMessage(ctx, conv.ID, session.ID, "orchestrator-gen", domain.ConversationMessage{
+		ID: "orchestrator-pocket-message", Origin: domain.MessageOriginHuman, Text: "plan this project",
+	}, "orchestrator-pocket-turn", now)
+	if err != nil || !created {
+		t.Fatalf("append orchestrator turn: created=%v err=%v", created, err)
+	}
+	if err := s.ReconcilePocketExecutionLifecycle(ctx, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.PocketExecutionForSession(ctx, session.ID, "orchestrator-pocket-turn"); err != nil || ok {
+		t.Fatalf("orchestrator turn must not become worker execution: ok=%v err=%v", ok, err)
+	}
+}
+
