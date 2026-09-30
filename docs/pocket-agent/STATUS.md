@@ -200,7 +200,7 @@ discovery is therefore possible, but no credential or live availability has been
 assumed or tested.
 
 
-## Durable task/execution state and validation evidence — pending PR
+## Durable task/execution state and validation evidence — merged via PR #6
 
 Feature branch base: `pocket-main` @
 `69f2b00e8a59ca0949cf75fb9bfe6dc7011f159b` (PR #5 merged).
@@ -263,3 +263,74 @@ dependency-aware planning, automatic acceptance, Git merge authorization,
 per-execution token accounting, or dependency graph is added here. Session usage
 remains explicitly session-scoped until AO has an authoritative execution-level
 ledger.
+
+## Automatic execution lifecycle and deterministic validation — pending PR
+
+Feature branch base: `pocket-main` @
+`f2a1727c8f2e96c4c469c301fff2b2f488177e82` (PR #6 merged).
+
+### Implemented on this feature branch
+
+- Pocket execution state is now an automatic projection of AO's durable Chat/session facts:
+  - user- and automation-authored Chat turns created after the lifecycle migration
+    become Pocket tasks/attempts without manual Pocket API bookkeeping;
+  - the AO session becomes the durable logical worker identity;
+  - conversation, turn, project and worktree facts are retained on the attempt;
+  - asynchronous provisioning can fill previously unavailable worktree paths later;
+  - queued/running/completed/recovered/failed/interrupted/cancelled states follow the
+    authoritative AO conversation-turn state without replacing AO lifecycle semantics.
+- AO retry turns create new immutable Pocket attempts. The new attempt points to the
+  prior Pocket execution, and its lineage is derived from AO's existing
+  `retry_of_turn_id` relation rather than caller/model text.
+- A migration-time lifecycle watermark preserves existing sessions: historical Chat
+  turns are not bulk-converted. If a new AO retry targets a historical failed turn,
+  only the explicit prior chain needed for that retry is materialized.
+- Daemon startup runs Pocket reconciliation after AO's existing persistent Chat,
+  session and runtime recovery. A stale unfinished Pocket attempt therefore adopts
+  the recovered/failed/interrupted AO turn fact instead of remaining falsely running.
+  A small periodic reconciler is only a safety net for durable facts that arrive
+  after asynchronous provisioning.
+- Deterministic validation requirements can now carry an executable command. The
+  Pocket validation runner executes the command in the execution's owning AO
+  worktree using AO's existing process wrapper and the platform shell.
+- Deterministic validation results are append-only evidence:
+  - command exit 0 => `pass`;
+  - a command that ran and returned a non-zero status => `fail`;
+  - missing command, missing worktree, missing executable or timeout => `unknown`.
+  No unavailable condition is promoted to a pass or deterministic failure.
+- Validation runs only after an AO attempt is durably completed/recovered and only
+  when no deterministic result already exists for that requirement/attempt.
+  A daemon crash during a validation command records no fabricated result, so the
+  check is eligible again after restart.
+- Existing deterministic-authority semantics remain unchanged: model/semantic
+  evidence cannot satisfy a deterministic requirement or override its latest
+  deterministic failure. This increment still does not accept tasks or authorize
+  Git merges automatically.
+- `ao session execution <id> --json` requires no new CLI path: its existing durable
+  Pocket overlay now naturally receives the projected attempt lineage and persisted
+  validation evidence.
+
+### Tests added
+
+- Automatic task/worker/execution creation from real AO Chat turns.
+- Queued -> running -> completed lifecycle projection and late worktree binding.
+- Explicit retry attempt creation with prior-attempt lineage.
+- Restart/reopen reconciliation of stale unfinished attempts after AO's orphan-turn
+  recovery.
+- Migration-watermark legacy compatibility and opt-in lineage creation when a new
+  retry targets a historical turn.
+- Deterministic validation execution in the owning worktree.
+- Deterministic pass/fail persistence and unavailable/missing-worktree => unknown.
+- Existing durable-state tests continue to prove missing evidence stays unknown and
+  later semantic/model output cannot override a deterministic failure.
+
+The PR test gate remains bounded: Pocket store tests, Pocket coordinator tests and
+Pocket CLI tests are targeted explicitly. The repository-wide
+`go test -race ./...` gate is not restored.
+
+### Deliberately not implemented
+
+No model routing/ranking, JEV, Pi/DeepSeek Harness routing, worker/session reuse
+policy, dependency-aware planning, automatic task acceptance, Git merge
+authorization or per-execution token ledger is added here.
+
