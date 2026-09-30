@@ -14,27 +14,55 @@ import (
 // paginated, so fetchConversationSnapshot reconstructs the complete active
 // conversation before returning this value.
 type conversationSnapshotDTO struct {
-	ConversationID string                   `json:"conversationId"`
-	ActiveBranchID string                   `json:"activeBranchId,omitempty"`
-	SessionID      string                   `json:"sessionId"`
-	Harness        string                   `json:"harness,omitempty"`
-	Mode           string                   `json:"mode"`
-	Controller     string                   `json:"controller"`
-	Title          string                   `json:"title,omitempty"`
-	LatestSequence int64                    `json:"latestSequence"`
-	OldestSequence int64                    `json:"oldestSequence,omitempty"`
-	HasMoreBefore  bool                     `json:"hasMoreBefore"`
-	Turns          []conversationTurnDTO    `json:"turns"`
-	Messages       []conversationMessageDTO `json:"messages"`
+	ConversationID string                    `json:"conversationId"`
+	ActiveBranchID string                    `json:"activeBranchId,omitempty"`
+	SessionID      string                    `json:"sessionId"`
+	Harness        string                    `json:"harness,omitempty"`
+	Mode           string                    `json:"mode"`
+	Controller     string                    `json:"controller"`
+	Title          string                    `json:"title,omitempty"`
+	LatestSequence int64                     `json:"latestSequence"`
+	OldestSequence int64                     `json:"oldestSequence,omitempty"`
+	HasMoreBefore  bool                      `json:"hasMoreBefore"`
+	Turns          []conversationTurnDTO     `json:"turns"`
+	Messages       []conversationMessageDTO  `json:"messages"`
+	Activities     []conversationActivityDTO `json:"activities"`
 }
 
 type conversationTurnDTO struct {
-	ID           string  `json:"id"`
-	State        string  `json:"state"`
-	ErrorMessage string  `json:"errorMessage,omitempty"`
-	RequestedAt  string  `json:"requestedAt"`
-	CompletedAt  *string `json:"completedAt,omitempty"`
-	RolledBack   bool    `json:"rolledBack,omitempty"`
+	ID              string                   `json:"id"`
+	State           string                   `json:"state"`
+	RetryOfTurnID   string                   `json:"retryOfTurnId,omitempty"`
+	HasRetryAttempt bool                     `json:"hasRetryAttempt,omitempty"`
+	ErrorMessage    string                   `json:"errorMessage,omitempty"`
+	RequestedAt     string                   `json:"requestedAt"`
+	StartedAt       *string                  `json:"startedAt,omitempty"`
+	CompletedAt     *string                  `json:"completedAt,omitempty"`
+	RolledBack      bool                     `json:"rolledBack,omitempty"`
+	Diff            *conversationTurnDiffDTO `json:"diff,omitempty"`
+}
+
+type conversationTurnDiffDTO struct {
+	Files     []conversationDiffFileDTO `json:"files"`
+	Truncated bool                      `json:"truncated,omitempty"`
+}
+
+type conversationDiffFileDTO struct {
+	Path      string `json:"path"`
+	OldPath   string `json:"oldPath,omitempty"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+type conversationActivityDTO struct {
+	ID           string `json:"id"`
+	TurnID       string `json:"turnId,omitempty"`
+	Sequence     int64  `json:"sequence"`
+	ActivityKind string `json:"activityKind"`
+	Status       string `json:"status"`
+	RequestID    string `json:"requestId,omitempty"`
+	CreatedAt    string `json:"createdAt,omitempty"`
 }
 
 type conversationMessageDTO struct {
@@ -124,10 +152,12 @@ func mergeConversationPages(pages []conversationSnapshotDTO) conversationSnapsho
 	out := pages[0]
 	out.Turns = nil
 	out.Messages = nil
+	out.Activities = nil
 	out.HasMoreBefore = false
 
 	seenTurns := make(map[string]struct{})
 	seenMessages := make(map[string]struct{})
+	seenActivities := make(map[string]struct{})
 	for i := len(pages) - 1; i >= 0; i-- {
 		page := pages[i]
 		out.OldestSequence = page.OldestSequence
@@ -144,6 +174,13 @@ func mergeConversationPages(pages []conversationSnapshotDTO) conversationSnapsho
 			}
 			seenMessages[msg.ID] = struct{}{}
 			out.Messages = append(out.Messages, msg)
+		}
+		for _, activity := range page.Activities {
+			if _, ok := seenActivities[activity.ID]; ok {
+				continue
+			}
+			seenActivities[activity.ID] = struct{}{}
+			out.Activities = append(out.Activities, activity)
 		}
 	}
 	return out

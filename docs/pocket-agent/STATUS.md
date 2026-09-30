@@ -142,7 +142,59 @@ assumption. Android background-process survival and boot supervision are not
 claimed. TUI has no canonical semantic result source; `ao session result` remains
 Chat-only. There is no physical-device validation in this status update.
 
-Next: resolve any failures from the deterministic Thor/iPhone sequence. Once that
-path is proven, implement deterministic routing/telemetry, followed by bounded
-JEV and optional harness evaluation. Do not promote routing work ahead of an
-operational control plane.
+Physical Thor/OpenCode/iPhone acceptance remains pending and must still be run when the
+device is available. Per the latest project decision, device acceptance no longer blocks
+independent backend/control-plane work. New implementation work starts from current
+`pocket-main` on a feature branch and returns through an unmerged PR; `main` and
+`quant-main` remain untouched.
+
+
+## Execution evidence and deterministic completion pre-gates — pending PR
+
+Feature branch base: `pocket-main` @
+`18347f4d549c1767dbabe5fb2e51182a5c21bb56`.
+
+### Verified before implementation
+
+- Phase 6 Chat result semantics already exist through `ao session result <id>`: exact
+  durable assistant output, explicit `completed/running/failed/malformed` states,
+  no generated summary, and no terminal scraping. TUI remains explicitly unsupported
+  until a harness-native semantic result source exists.
+- Current AO already persists canonical nullable session usage totals for input,
+  cached input, uncached input, output and estimated cost where a supported source
+  reports them. Missing counters remain null; incomplete collection remains explicit.
+- Chat conversation usage is latest cumulative conversation state, not a per-turn
+  ledger. It must not be relabeled as execution-scoped usage.
+
+### Implemented on this feature branch
+
+- New `ao session execution <id> [--json]` observation command combines existing
+  durable AO facts into schema `pocket.execution.v1`.
+- Latest non-rolled-back Chat turn reports timing, retry lineage and changed-file
+  evidence when the daemon has them.
+- Exact `ao session result` semantics are embedded rather than duplicated or
+  summarized.
+- Canonical usage/cache/cost is exposed with `scope: "session"` and
+  `executionScoped: false`. Cache hit ratio is derived only when both inclusive
+  input and cached-input counters are known.
+- Unknown execution-level usage/cost, provider/account, historical effort, validation,
+  dependency and final-human-approval facts are explicitly named as unknown.
+- Deterministic completion pre-gates block on an incomplete/malformed/failed result
+  or any pending approval/structured input. Validation, dependency and final approval
+  gates remain unknown until durable task policy supplies them.
+- `automaticAcceptanceAllowed` and `mergeAuthorized` are both false. Semantic task
+  acceptance never grants Git merge authority.
+
+### Not yet claimed
+
+This increment is a policy/telemetry foundation, not Phase 7/8 completion. It does not
+yet add durable task/worker/execution identities, per-execution token accounting,
+task-scoped validation profiles/results, dependency graphs, autonomy budgets, route
+candidate filtering, retry/escalation budgets, worker reuse, cache-aware switching,
+Jev decisions, or multi-task planning.
+
+Jev live integration is intentionally not present. The official TypeSafe OpenAPI
+currently exposes `POST https://api.typesafe.ai/v1/systemone` and
+`GET https://api.typesafe.ai/v1/models` with bearer authentication. Dynamic model
+discovery is therefore possible, but no credential or live availability has been
+assumed or tested.
