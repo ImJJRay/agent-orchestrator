@@ -224,7 +224,7 @@ WHERE id = ?`, fact.SessionID).Scan(&projectID, &workspacePath, &workspaceRepoPa
 		return domain.PocketExecution{}, false, err
 	}
 
-	taskID := ""
+	var taskID string
 	priorExecutionID := ""
 	attemptNumber := int64(1)
 	if fact.RetryOfTurnID != "" {
@@ -359,7 +359,7 @@ ORDER BY t.requested_at, t.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list untracked Pocket turns: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -412,6 +412,7 @@ WHERE execution.turn_id <> ''
 	if err != nil {
 		return fmt.Errorf("list Pocket executions for reconciliation: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
 	var pending []row
 	for rows.Next() {
 		var item row
@@ -425,13 +426,9 @@ WHERE execution.turn_id <> ''
 			&item.workspacePath,
 			&item.workspaceRepoPath,
 		); err != nil {
-			_ = rows.Close()
 			return fmt.Errorf("scan Pocket execution reconciliation row: %w", err)
 		}
 		pending = append(pending, item)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close Pocket execution reconciliation rows: %w", err)
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate Pocket execution reconciliation rows: %w", err)
@@ -578,7 +575,7 @@ LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list pending deterministic Pocket validation: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]domain.PocketValidationWorkItem, 0)
 	for rows.Next() {
 		var item domain.PocketValidationWorkItem
