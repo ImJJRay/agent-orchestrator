@@ -12,6 +12,83 @@ This file records Pocket Agent project state only. Upstream product status remai
 - Legacy branch name `quant-main` is superseded by `pocket-main` and should not receive new work.
 - Phase 0 custom baseline is integrated into `pocket-main`.
 
+## Deterministic Orchestration Core — this increment
+
+Implementation base: `pocket-main` @ `2e6247666f4cf7938a548f0852f6d249e1d2bd68`
+(after merged PR #8). Feature branch: `feature/pocket-deterministic-core`.
+This section supersedes older "not implemented" lists for deterministic policy,
+dependencies, budgets and actuation only; those historical milestone lists describe
+their own increments.
+
+### Implemented
+
+- Durable, project-scoped task dependency DAG; atomic edge replacement rejects
+  missing/cross-project/duplicate/self edges and transitive cycles. Dependencies
+  are set before the first execution and cannot be retrofitted onto running work.
+- Readiness is derived from AO facts and explicit task state. A prerequisite needs
+  explicit completion and cannot have failed, pending or unknown required checks.
+  AO turn completion alone does not satisfy a task dependency.
+- One pure policy evaluator produces `READY`, `BLOCKED`, `RETRY`, `ESCALATE`,
+  `NEEDS_USER` and explicit `COMPLETED`, with stable reasons and permission flags.
+- Per-task authorization defaults to automation off. Explicit Chat worker targets
+  and finite attempt/retry/escalation budgets govern automatic initial execution,
+  remediation and escalation. Attempts include reservations and manual AO retries;
+  changing configuration never resets consumed budgets. Escalations traverse the
+  user-configured AO session list in order; no model/harness ranking is performed.
+- Decisions retain immutable input facts and outcomes. Unchanged polling reuses
+  the same decision. A transactional outbox reserves the attempt and decision
+  together; unique root/child relations prevent duplicate attempts. Append-only
+  action events also retain admission refusals, dispatch and recovery transitions.
+- Actuation calls AO's existing durable Chat dispatch/native retry machinery.
+  Idle admission refuses concurrent unrelated work or unresolved user interactions
+  instead of queuing behind it. Native AO retries preserve AO retry lineage;
+  validation remediation and cross-session escalation retain Pocket prior-attempt
+  lineage without counterfeiting an AO native retry relationship.
+- Execution-scoped validation requirements carry to child attempts, with fresh
+  evidence. Deterministic failures remain authoritative over semantic claims.
+- Startup reconciliation runs after AO recovery. Delivery IDs reconnect reserved
+  attempts to AO turns, including a crash after AO persistence but before Pocket
+  acknowledgement. A crash before persistence can resume the same delivery ID.
+  An uncertain call without a durable AO turn stops at `NEEDS_USER`; a proven idle
+  admission refusal retains the same reservation for a later safe dispatch.
+- Loopback-only policy/configuration/dependency/history endpoints and thin
+  `ao pocket policy <task-id> [--json]` /
+  `ao pocket decisions <task-id> [--json] [--before <sequence>]` visibility.
+  Decision history is paginated, not truncated at the latest display page.
+
+### Boundaries and configuration
+
+See [ORCHESTRATION.md](ORCHESTRATION.md) for setup, policy reasons, recovery and
+budget semantics. Existing tasks remain observation-only until explicitly configured.
+Successful deterministic checks require user acceptance; neither execution nor
+validation completion changes task state automatically. No outcome authorizes Git
+merges. The existing session usage remains session-scoped.
+
+Remaining work: JEV, intelligent route selection, model/harness availability/ranking,
+cache-aware routing, worker/session reuse policy, generative planning, semantic
+automatic acceptance, per-execution token/cost accounting and Git merge authorization.
+These are separate future increments. Native DSH/Pi support comes from AO; this
+increment adds no custom harness adapter or routing evaluation.
+
+### Validation
+
+The Pocket PR gate remains bounded, now including policy, API/CLI and Chat admission
+regressions. It does not restore repository-wide `go test -race ./...`.
+Tests cover DAG rejection and persistence, readiness, finite/exhausted budgets,
+validation failure/unknown/semantic override, inherited checks, native retry lineage,
+explicit escalation, action reservation/claim races, restart before/after AO
+persistence, dispatch refusal, audit paging and duplicate prevention.
+Local checks passed: Go build/vet, the bounded Pocket migration/store/coordinator/
+CLI/HTTP/Chat gate, scoped race regressions, existing AO retry/send regressions,
+complete Linux CLI E2E, telemetry classification, API regeneration/spec drift,
+sqlc regeneration and golangci-lint (zero findings). Cloud build/vet passed;
+the full cloud race suite could not pass locally because
+`TestCheckpointBridgeRunsOnPoke` and `TestCheckpointBridgeSafetyNetFires` require
+Unix-socket calls rejected by this environment. Docker fresh-install and native
+Windows/macOS checks require CI; no local pass is claimed for those jobs.
+On-device Thor/provider execution remains unverified in this increment.
+
+
 ## Phase 0 custom delta
 
 - `ao session conversation <id>`
@@ -264,7 +341,7 @@ per-execution token accounting, or dependency graph is added here. Session usage
 remains explicitly session-scoped until AO has an authoritative execution-level
 ledger.
 
-## Automatic execution lifecycle and deterministic validation — pending PR
+## Automatic execution lifecycle and deterministic validation — merged before PR #8
 
 Feature branch base: `pocket-main` @
 `f2a1727c8f2e96c4c469c301fff2b2f488177e82` (PR #6 merged).

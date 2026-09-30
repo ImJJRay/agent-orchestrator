@@ -1370,6 +1370,25 @@ func (c *Controller) Send(ctx context.Context, msg ports.ChatUserMessage) (domai
 	return c.sendLocked(ctx, msg, true)
 }
 
+// SendPolicy admits policy work only while idle and without unresolved user
+// interactions. The check shares the Chat send lock, so concurrent human work
+// cannot turn a safe policy action into queued work behind an unrelated turn.
+func (c *Controller) SendPolicy(ctx context.Context, msg ports.ChatUserMessage) (domain.ConversationTurn, error) {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.busy() {
+		return domain.ConversationTurn{}, errors.Join(domain.ErrPocketAdmissionBlocked, ErrTurnRunning)
+	}
+	pending, err := c.store.HasPendingConversationInteractions(ctx, c.conversation.ID)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	if pending {
+		return domain.ConversationTurn{}, domain.ErrPocketAdmissionBlocked
+	}
+	return c.sendLocked(ctx, msg, false)
+}
+
 func (c *Controller) sendLocked(
 	ctx context.Context,
 	msg ports.ChatUserMessage,
@@ -1453,6 +1472,24 @@ func (c *Controller) sendLocked(
 func (c *Controller) RetryTurn(ctx context.Context, turnID string) (domain.ConversationTurn, error) {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
+	return c.retryTurnLocked(ctx, turnID)
+}
+
+// RetryPolicy applies idle/interaction admission before AO's native retry checks.
+func (c *Controller) RetryPolicy(ctx context.Context, turnID string) (domain.ConversationTurn, error) {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	pending, err := c.store.HasPendingConversationInteractions(ctx, c.conversation.ID)
+	if err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	if pending || c.busy() {
+		return domain.ConversationTurn{}, domain.ErrPocketAdmissionBlocked
+	}
+	return c.retryTurnLocked(ctx, turnID)
+}
+
+func (c *Controller) retryTurnLocked(ctx context.Context, turnID string) (domain.ConversationTurn, error) {
 	if c.handoffActive() {
 		return domain.ConversationTurn{}, ErrControllerHandoff
 	}

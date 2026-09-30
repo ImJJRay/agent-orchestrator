@@ -174,6 +174,7 @@ var shippedMigrations = map[int64]string{
 	168: "0168_cues.sql",
 	169: "0169_pocket_execution_state.sql",
 	170: "0170_pocket_execution_lifecycle.sql",
+	171: "0171_pocket_orchestration.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
