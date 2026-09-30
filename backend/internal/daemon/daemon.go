@@ -43,6 +43,7 @@ import (
 	agentswitchobs "github.com/aoagents/agent-orchestrator/backend/internal/observe/agentswitch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/sentryobs"
 	usagepipeline "github.com/aoagents/agent-orchestrator/backend/internal/observe/usage"
+	pocketsvc "github.com/aoagents/agent-orchestrator/backend/internal/pocket"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -295,6 +296,7 @@ func Run() error {
 	// graceful shutdown inside Server.Run and stops the background goroutines.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	pocketCoordinator := pocketsvc.New(pocketsvc.Options{Store: store, Logger: log})
 	policyCoordinator.StartWatcher(ctx)
 	defer func() { _ = policyCoordinator.CloseAndDrain(context.Background()) }()
 	// Constructing the synchronous sender performs no I/O. The hard production
@@ -957,6 +959,7 @@ func Run() error {
 		}()
 	}
 
+	var pocketDone <-chan struct{}
 	var startupReconcileDone <-chan struct{}
 	runErr := srv.RunWithReady(ctx, func() {
 		// Agent-readiness warming is advisory and idempotent, and request paths
@@ -977,6 +980,17 @@ func Run() error {
 			if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
 				log.Error("background agent-process reconciliation on boot failed", "err", reconcileErr)
 			}
+			// Pocket is a projection of AO's durable facts. Reconcile it only after
+			// AO has adopted/settled runtime and Chat state so stale in-flight attempts
+			// cannot survive a daemon restart as false "running" executions.
+			if reconcileErr := pocketCoordinator.Reconcile(ctx); reconcileErr != nil {
+				log.Error("Pocket execution reconciliation on boot failed", "err", reconcileErr)
+			}
+			// Periodic projection/validation starts only after AO recovery and this
+			// initial Pocket projection have completed. The startupReconcileDone close
+			// publishes pocketDone to the shutdown path without another synchronization
+			// primitive.
+			pocketDone = pocketCoordinator.Start(ctx)
 		}()
 	})
 
@@ -1005,6 +1019,9 @@ func Run() error {
 	installStopCancel()
 	if startupReconcileDone != nil {
 		<-startupReconcileDone
+	}
+	if pocketDone != nil {
+		<-pocketDone
 	}
 	backgroundStopCtx, backgroundStopCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	if err := sessMgr.WaitBackgroundWorkers(backgroundStopCtx); err != nil {

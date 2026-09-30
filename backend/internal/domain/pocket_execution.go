@@ -116,6 +116,7 @@ type PocketValidationRequirement struct {
 	Scope         PocketValidationScope `json:"scope"`
 	CheckID       string                `json:"checkId"`
 	Description   string                `json:"description,omitempty"`
+	Command       string                `json:"command,omitempty"`
 	Deterministic bool                  `json:"deterministic"`
 	Required      bool                  `json:"required"`
 	CreatedAt     time.Time             `json:"createdAt"`
@@ -140,6 +141,13 @@ type PocketValidationEvidence struct {
 	Requirement    PocketValidationRequirement `json:"requirement"`
 	EffectiveState PocketValidationState       `json:"effectiveState"`
 	Results        []PocketValidationResult    `json:"results"`
+}
+
+// PocketValidationWorkItem is one deterministic requirement ready to execute
+// against the AO worktree snapshotted by its execution attempt.
+type PocketValidationWorkItem struct {
+	Execution   PocketExecution             `json:"execution"`
+	Requirement PocketValidationRequirement `json:"requirement"`
 }
 
 // PocketExecutionSnapshot is the durable task/worker/attempt/validation view for a session execution.
