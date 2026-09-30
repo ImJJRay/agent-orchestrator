@@ -419,7 +419,34 @@ func (s *Store) CreatePocketValidationRequirement(
 	deterministic, required bool,
 	now time.Time,
 ) (domain.PocketValidationRequirement, error) {
+	return s.createPocketValidationRequirement(
+		ctx, taskID, executionID, checkID, description, "", scope, deterministic, required, now)
+}
+
+// CreatePocketValidationCommandRequirement persists a validation requirement
+// whose deterministic implementation is a shell command executed in the owning
+// AO worktree. The older method remains source-compatible for callers that only
+// describe a check; those requirements intentionally validate as unknown.
+func (s *Store) CreatePocketValidationCommandRequirement(
+	ctx context.Context,
+	taskID, executionID, checkID, description, command string,
+	scope domain.PocketValidationScope,
+	deterministic, required bool,
+	now time.Time,
+) (domain.PocketValidationRequirement, error) {
+	return s.createPocketValidationRequirement(
+		ctx, taskID, executionID, checkID, description, command, scope, deterministic, required, now)
+}
+
+func (s *Store) createPocketValidationRequirement(
+	ctx context.Context,
+	taskID, executionID, checkID, description, command string,
+	scope domain.PocketValidationScope,
+	deterministic, required bool,
+	now time.Time,
+) (domain.PocketValidationRequirement, error) {
 	checkID = strings.TrimSpace(checkID)
+	command = strings.TrimSpace(command)
 	if taskID == "" || checkID == "" {
 		return domain.PocketValidationRequirement{}, fmt.Errorf("%w: taskId and checkId are required", domain.ErrPocketInvalid)
 	}
@@ -458,52 +485,20 @@ func (s *Store) CreatePocketValidationRequirement(
 	}
 	req := domain.PocketValidationRequirement{
 		ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, Scope: scope,
-		CheckID: checkID, Description: strings.TrimSpace(description), Deterministic: deterministic,
-		Required: required, CreatedAt: now.UTC(),
+		CheckID: checkID, Description: strings.TrimSpace(description), Command: command,
+		Deterministic: deterministic, Required: required, CreatedAt: now.UTC(),
 	}
 	if _, err := s.writeDB.ExecContext(ctx, `
 INSERT INTO pocket_validation_requirements
-(id, task_id, execution_id, scope, check_id, description, deterministic, required, created_at)
-VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+(id, task_id, execution_id, scope, check_id, description, deterministic, required, created_at, command)
+VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.TaskID, req.ExecutionID, req.Scope, req.CheckID, req.Description,
-		req.Deterministic, req.Required, req.CreatedAt); err != nil {
+		req.Deterministic, req.Required, req.CreatedAt, req.Command); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return domain.PocketValidationRequirement{}, fmt.Errorf("%w: validation check %s already exists in scope", domain.ErrPocketConflict, checkID)
 		}
 		return domain.PocketValidationRequirement{}, fmt.Errorf("insert pocket validation requirement: %w", err)
 	}
-	return req, nil
-}
-
-// CreatePocketValidationCommandRequirement persists a validation requirement
-// whose deterministic implementation is a shell command executed in the owning
-// AO worktree. The older method remains source-compatible for callers that only
-// describe a check; those requirements intentionally validate as unknown.
-func (s *Store) CreatePocketValidationCommandRequirement(
-	ctx context.Context,
-	taskID, executionID, checkID, description, command string,
-	scope domain.PocketValidationScope,
-	deterministic, required bool,
-	now time.Time,
-) (domain.PocketValidationRequirement, error) {
-	req, err := s.CreatePocketValidationRequirement(
-		ctx, taskID, executionID, checkID, description, scope, deterministic, required, now)
-	if err != nil {
-		return domain.PocketValidationRequirement{}, err
-	}
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return req, nil
-	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if _, err := s.writeDB.ExecContext(ctx,
-		`UPDATE pocket_validation_requirements SET command = ? WHERE id = ?`,
-		command, req.ID,
-	); err != nil {
-		return domain.PocketValidationRequirement{}, fmt.Errorf("store deterministic validation command: %w", err)
-	}
-	req.Command = command
 	return req, nil
 }
 
