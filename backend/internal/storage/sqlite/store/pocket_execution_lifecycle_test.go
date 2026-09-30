@@ -240,3 +240,117 @@ func TestPocketLifecyclePreservesLegacyFallbackUntilNewRetry(t *testing.T) {
 		t.Fatalf("legacy retry lineage=%#v", got.Attempts)
 	}
 }
+
+func TestPocketAutomaticExecutionFeedsDeterministicValidationQueue(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fixture := seedPocketFixture(t, s)
+	now := time.Now().UTC()
+
+	if err := s.BindTurnToProvider(ctx, fixture.turn1, "provider-validation-turn", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleTurn(
+		ctx,
+		fixture.convID,
+		"provider-validation-turn",
+		domain.TurnStateCompleted,
+		"",
+		now.Add(time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcilePocketExecutionLifecycle(ctx, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok, err := s.PocketExecutionForSession(ctx, fixture.session.ID, fixture.turn1)
+	if err != nil || !ok {
+		t.Fatalf("automatic execution: ok=%v err=%v", ok, err)
+	}
+	if snapshot.Execution.State != domain.PocketExecutionCompleted {
+		t.Fatalf("execution state=%q, want completed", snapshot.Execution.State)
+	}
+
+	requirement, err := s.CreatePocketValidationCommandRequirement(
+		ctx,
+		snapshot.Task.ID,
+		"",
+		"focused-go-test",
+		"focused deterministic check",
+		"go test ./internal/pocket",
+		domain.PocketValidationTaskScope,
+		true,
+		true,
+		now.Add(3*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requirement.Command != "go test ./internal/pocket" {
+		t.Fatalf("stored command=%q", requirement.Command)
+	}
+
+	pending, err := s.PendingPocketDeterministicValidations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending validation=%#v", pending)
+	}
+	if pending[0].Execution.ID != snapshot.Execution.ID ||
+		pending[0].Execution.WorkspacePath != "/worktrees/mer-1" ||
+		pending[0].Requirement.ID != requirement.ID ||
+		pending[0].Requirement.Command != "go test ./internal/pocket" {
+		t.Fatalf("pending validation work item=%#v", pending[0])
+	}
+
+	if _, err := s.CreatePocketValidationResult(
+		ctx,
+		snapshot.Execution.ID,
+		requirement.ID,
+		domain.PocketValidationPass,
+		domain.PocketValidationSemantic,
+		"worker-output",
+		"model claims the check passed",
+		now.Add(4*time.Second),
+		now.Add(4*time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = s.PendingPocketDeterministicValidations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("semantic evidence must not suppress deterministic validation: %#v", pending)
+	}
+
+	if _, err := s.CreatePocketValidationResult(
+		ctx,
+		snapshot.Execution.ID,
+		requirement.ID,
+		domain.PocketValidationFail,
+		domain.PocketValidationDeterministic,
+		"pocket.validation.command",
+		"exit 1",
+		now.Add(5*time.Second),
+		now.Add(5*time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = s.PendingPocketDeterministicValidations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("deterministic observation should settle validation queue: %#v", pending)
+	}
+	got, ok, err := s.PocketExecutionForSession(ctx, fixture.session.ID, fixture.turn1)
+	if err != nil || !ok {
+		t.Fatalf("read deterministic evidence: ok=%v err=%v", ok, err)
+	}
+	if got.ValidationState != domain.PocketValidationFail {
+		t.Fatalf("validation state=%q, want fail", got.ValidationState)
+	}
+}
+
