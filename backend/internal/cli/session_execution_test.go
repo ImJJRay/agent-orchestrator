@@ -23,7 +23,7 @@ const sampleSessionUsageJSON = `{
 	"harnesses":[{"harness":"opencode","totals":{"inputTokens":100,"cachedInputTokens":50,"uncachedInputTokens":50,"outputTokens":20,"processedTokens":120,"estimatedCost":null},"models":[{"modelId":"gpt-5.6-sol","totals":{"inputTokens":100,"cachedInputTokens":50,"uncachedInputTokens":50,"outputTokens":20,"processedTokens":120,"estimatedCost":null}}]}]
 }`
 
-func sessionExecutionServer(t *testing.T, conversation func(*http.Request) (int, string), usageBody string, mode string) *httptest.Server {
+func sessionExecutionServer(t *testing.T, conversation func(*http.Request) (int, string), usageBody string, mode string, pocketBody ...string) *httptest.Server {
 	t.Helper()
 	if mode == "" {
 		mode = "chat"
@@ -43,6 +43,12 @@ func sessionExecutionServer(t *testing.T, conversation func(*http.Request) (int,
 			_, _ = io.WriteString(w, body)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/usage/sessions/demo-1":
 			_, _ = io.WriteString(w, usageBody)
+		case r.Method == http.MethodGet && r.URL.Path == "/internal/pocket/sessions/demo-1/execution":
+			if len(pocketBody) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, pocketBody[0])
 		default:
 			http.NotFound(w, r)
 		}
@@ -74,6 +80,14 @@ func TestSessionExecution_NormalizesDurableEvidenceWithoutInventingTurnUsage(t *
 	if got.SchemaVersion != pocketExecutionSchemaVersion || got.Execution == nil || got.Execution.ID != "turn-1" {
 		t.Fatalf("unexpected execution identity: %#v", got)
 	}
+	if got.Task != nil || got.Worker != nil || got.DurableExecution != nil || got.Validation != nil {
+		t.Fatalf("legacy session synthesized Pocket state: %#v", got)
+	}
+	for _, want := range []string{"taskId", "workerId", "validationResults"} {
+		if !containsString(got.Unknown, want) {
+			t.Fatalf("legacy unknown missing %q: %#v", want, got.Unknown)
+		}
+	}
 	if got.Execution.DurationMillis == nil || *got.Execution.DurationMillis != 5000 {
 		t.Fatalf("duration=%v, want 5000ms", got.Execution.DurationMillis)
 	}
@@ -96,6 +110,73 @@ func TestSessionExecution_NormalizesDurableEvidenceWithoutInventingTurnUsage(t *
 		if !containsString(got.Unknown, want) {
 			t.Fatalf("unknown missing %q: %#v", want, got.Unknown)
 		}
+	}
+}
+
+func TestSessionExecution_UsesDurablePocketStateAndBlocksOnDeterministicFailure(t *testing.T) {
+	cfg := setConfigEnv(t)
+	conversation := `{
+		"conversationId":"conv-1","activeBranchId":"root","sessionId":"demo-1","harness":"opencode","mode":"chat","controller":"ready",
+		"latestSequence":2,"oldestSequence":1,"hasMoreBefore":false,
+		"turns":[{"id":"turn-2","state":"completed","retryOfTurnId":"turn-1","requestedAt":"2026-09-30T00:00:00Z","completedAt":"2026-09-30T00:00:05Z"}],
+		"messages":[{"id":"m2","turnId":"turn-2","sequence":2,"role":"assistant","text":"looks good","streaming":false}],
+		"activities":[]
+	}`
+	pocket := `{
+		"task":{"id":"task-1","projectId":"demo","objective":"fix it","state":"active","createdAt":"2026-09-30T00:00:00Z","updatedAt":"2026-09-30T00:00:00Z"},
+		"worker":{"id":"worker-1","sessionId":"demo-1","createdAt":"2026-09-30T00:00:00Z"},
+		"execution":{"id":"exec-2","taskId":"task-1","workerId":"worker-1","attemptNumber":2,"priorExecutionId":"exec-1","sessionId":"demo-1","conversationId":"conv-1","turnId":"turn-2","projectId":"demo","workspacePath":"/ws/demo-1","workspaceRepoPath":"/repo","state":"completed","createdAt":"2026-09-30T00:00:00Z","updatedAt":"2026-09-30T00:00:05Z"},
+		"attempts":[
+			{"id":"exec-1","taskId":"task-1","workerId":"worker-1","attemptNumber":1,"sessionId":"demo-1","conversationId":"conv-1","turnId":"turn-1","projectId":"demo","state":"failed","createdAt":"2026-09-30T00:00:00Z","updatedAt":"2026-09-30T00:00:01Z"},
+			{"id":"exec-2","taskId":"task-1","workerId":"worker-1","attemptNumber":2,"priorExecutionId":"exec-1","sessionId":"demo-1","conversationId":"conv-1","turnId":"turn-2","projectId":"demo","state":"completed","createdAt":"2026-09-30T00:00:02Z","updatedAt":"2026-09-30T00:00:05Z"}
+		],
+		"validationState":"fail",
+		"validation":[{
+			"requirement":{"id":"req-1","taskId":"task-1","scope":"task","checkId":"go-test","description":"go test ./...","deterministic":true,"required":true,"createdAt":"2026-09-30T00:00:00Z"},
+			"effectiveState":"fail",
+			"results":[
+				{"id":"result-model","requirementId":"req-1","taskId":"task-1","executionId":"exec-2","state":"pass","sourceKind":"semantic","source":"worker-output","observedAt":"2026-09-30T00:00:05Z","createdAt":"2026-09-30T00:00:05Z"},
+				{"id":"result-test","requirementId":"req-1","taskId":"task-1","executionId":"exec-2","state":"fail","sourceKind":"deterministic","source":"go test ./...","detail":"exit 1","observedAt":"2026-09-30T00:00:04Z","createdAt":"2026-09-30T00:00:04Z"}
+			]
+		}]
+	}`
+	srv := sessionExecutionServer(t, func(*http.Request) (int, string) { return http.StatusOK, conversation }, sampleSessionUsageJSON, "chat", pocket)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "execution", "demo-1", "--json")
+	if err != nil {
+		t.Fatalf("execution failed: %v\nstderr=%s", err, errOut)
+	}
+	var got sessionExecutionOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if got.Task == nil || got.Task.ID != "task-1" || got.Worker == nil || got.Worker.ID != "worker-1" {
+		t.Fatalf("durable identity missing: %#v", got)
+	}
+	if got.DurableExecution == nil || got.DurableExecution.ID != "exec-2" || got.DurableExecution.PriorExecutionID != "exec-1" || got.DurableExecution.AttemptNumber != 2 {
+		t.Fatalf("durable execution lineage missing: %#v", got.DurableExecution)
+	}
+	if len(got.Attempts) != 2 || got.Attempts[0].ID != "exec-1" || got.Attempts[1].ID != "exec-2" {
+		t.Fatalf("task attempt lineage=%#v", got.Attempts)
+	}
+	if got.Validation == nil || got.Validation.State != "fail" || gateState(got.Policy.Gates, "deterministic_validation") != "fail" {
+		t.Fatalf("validation/policy=%#v / %#v", got.Validation, got.Policy)
+	}
+	if got.Policy.State != "blocked" || got.Policy.AutomaticAcceptanceAllowed || got.Policy.MergeAuthorized {
+		t.Fatalf("deterministic failure was not authoritative: %#v", got.Policy)
+	}
+	for _, removed := range []string{"taskId", "workerId", "executionRetryCount", "validationResults"} {
+		if containsString(got.Unknown, removed) {
+			t.Fatalf("known durable fact still reported unknown %q: %#v", removed, got.Unknown)
+		}
+	}
+}
+
+func TestDeterministicValidationState_MissingEvidenceStaysUnknown(t *testing.T) {
+	got := deterministicValidationState(nil)
+	if got != "unknown" {
+		t.Fatalf("no requirements=%q, want unknown", got)
 	}
 }
 
