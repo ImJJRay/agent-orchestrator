@@ -72,7 +72,6 @@ type executionTurnOutput struct {
 	DurationMillis        *int64                       `json:"durationMillis"`
 	RetryOfExecutionID    string                       `json:"retryOfExecutionId,omitempty"`
 	HasRetryAttempt       bool                         `json:"hasRetryAttempt"`
-	RetryCount            int                          `json:"retryCount"`
 	ChangedFilesKnown     bool                         `json:"changedFilesKnown"`
 	ChangedFilesTruncated bool                         `json:"changedFilesTruncated"`
 	ChangedFiles          []executionChangedFileOutput `json:"changedFiles,omitempty"`
@@ -177,7 +176,7 @@ func buildSessionExecutionOutput(sess sessionDTO, snapshot conversationSnapshotD
 
 	var execution *executionTurnOutput
 	if hasTurn {
-		execution = executionTurn(turn, snapshot.Turns)
+		execution = executionTurn(turn)
 	}
 
 	cacheRatio := cacheHitRatio(usage.Totals)
@@ -204,7 +203,7 @@ func buildSessionExecutionOutput(sess sessionDTO, snapshot conversationSnapshotD
 	}
 }
 
-func executionTurn(turn conversationTurnDTO, turns []conversationTurnDTO) *executionTurnOutput {
+func executionTurn(turn conversationTurnDTO) *executionTurnOutput {
 	out := &executionTurnOutput{
 		ID:                 turn.ID,
 		State:              turn.State,
@@ -213,7 +212,6 @@ func executionTurn(turn conversationTurnDTO, turns []conversationTurnDTO) *execu
 		CompletedAt:        turn.CompletedAt,
 		RetryOfExecutionID: turn.RetryOfTurnID,
 		HasRetryAttempt:    turn.HasRetryAttempt,
-		RetryCount:         retryCount(turns),
 	}
 	if turn.StartedAt != nil && turn.CompletedAt != nil {
 		started, startErr := time.Parse(time.RFC3339Nano, *turn.StartedAt)
@@ -232,16 +230,6 @@ func executionTurn(turn conversationTurnDTO, turns []conversationTurnDTO) *execu
 		}
 	}
 	return out
-}
-
-func retryCount(turns []conversationTurnDTO) int {
-	count := 0
-	for _, turn := range turns {
-		if !turn.RolledBack && turn.RetryOfTurnID != "" {
-			count++
-		}
-	}
-	return count
 }
 
 func cacheHitRatio(totals usageTotalsDTO) *float64 {
@@ -329,6 +317,8 @@ func executionUnknowns(profile executionProfileOutput, usage sessionUsageDTO, ex
 		"workerId",
 		"executionUsage",
 		"executionCost",
+		"executionRetryCount",
+		"executionModelAttribution",
 		"profile.effort",
 		"profile.provider",
 		"validationResults",
