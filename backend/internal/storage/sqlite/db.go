@@ -297,11 +297,17 @@ func migrate(db *sql.DB) error {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("set goose dialect: %w", err)
 	}
+	if err := repairPocketMigrationHistory(db); err != nil {
+		return fmt.Errorf("repair Pocket migration history: %w", err)
+	}
 	if err := repairRenumberedAgentInstallJobsMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered agent-install-jobs migration history: %w", err)
 	}
 	if err := repairRenumberedChatMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered chat migration history: %w", err)
+	}
+	if err := repairRenumberedCueMigrationHistory(db); err != nil {
+		return fmt.Errorf("repair renumbered cue migration history: %w", err)
 	}
 	if err := repairRenumberedTaskProvisioningMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered task-provisioning migration history: %w", err)
@@ -359,6 +365,201 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	return reconcileSchema(db)
+}
+
+// repairPocketMigrationHistory preserves Pocket databases created before
+// upstream claimed 0166/0167 for DeepSeek Harness and OpenCode 2. The old
+// Pocket migrations leave an identifiable physical schema, so only those
+// historical markers are moved to Pocket's new 0169/0170 versions.
+//
+// When the legacy marker occupied an upstream version and the corresponding
+// upstream harness widening is physically absent, remove that marker as well.
+// Goose can then apply the real upstream migration instead of silently
+// skipping it. Healthy/repaired databases are no-ops on subsequent starts.
+func repairPocketMigrationHistory(db *sql.DB) error {
+	var gooseTable int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'`).Scan(&gooseTable); err != nil {
+		return err
+	}
+	if gooseTable == 0 {
+		return nil
+	}
+
+	var pocketBaseTables int
+	if err := db.QueryRow(`
+SELECT COUNT(*) FROM sqlite_master
+WHERE type = 'table'
+  AND name IN (
+    'pocket_tasks',
+    'pocket_workers',
+    'pocket_executions',
+    'pocket_validation_requirements',
+    'pocket_validation_results'
+  )`).Scan(&pocketBaseTables); err != nil {
+		return err
+	}
+	if pocketBaseTables != 5 {
+		return nil
+	}
+
+	var commandColumn, lifecycleTable int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pocket_validation_requirements') WHERE name = 'command'`).Scan(&commandColumn); err != nil {
+		return err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pocket_lifecycle_state'`).Scan(&lifecycleTable); err != nil {
+		return err
+	}
+	hasPocketLifecycle := commandColumn == 1 && lifecycleTable == 1
+
+	var sessionsSQL string
+	if err := db.QueryRow(`SELECT COALESCE((SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'), '')`).Scan(&sessionsSQL); err != nil {
+		return err
+	}
+	hasDeepSeek := strings.Contains(sessionsSQL, "'deepseek-harness'")
+	hasOpenCodeV2 := strings.Contains(sessionsSQL, "'opencode-v2'")
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	applied := func(version int64) (bool, error) {
+		var value int
+		if err := tx.QueryRow(`
+SELECT COALESCE((
+    SELECT is_applied
+    FROM goose_db_version
+    WHERE version_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+), 0)`, version).Scan(&value); err != nil {
+			return false, err
+		}
+		return value == 1, nil
+	}
+
+	old166, err := applied(166)
+	if err != nil {
+		return err
+	}
+	old167, err := applied(167)
+	if err != nil {
+		return err
+	}
+	pocket169, err := applied(169)
+	if err != nil {
+		return err
+	}
+	pocket170, err := applied(170)
+	if err != nil {
+		return err
+	}
+
+	if old166 && !pocket169 {
+		if _, err := tx.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (169, 1)`); err != nil {
+			return err
+		}
+	}
+	if old167 && hasPocketLifecycle && !pocket170 {
+		if _, err := tx.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (170, 1)`); err != nil {
+			return err
+		}
+	}
+	if old166 && !hasDeepSeek {
+		if _, err := tx.Exec(`DELETE FROM goose_db_version WHERE version_id = 166`); err != nil {
+			return err
+		}
+	}
+	if old167 && hasPocketLifecycle && !hasOpenCodeV2 {
+		if _, err := tx.Exec(`DELETE FROM goose_db_version WHERE version_id = 167`); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// repairRenumberedCueMigrationHistory preserves preview Cue databases that
+// recorded 0149, 0155, 0156, 0159, 0161, 0162, or 0163 for Cues before main
+// assigned those versions to other features. Move only an identifiable Cue
+// schema to 0168 before the upstream migration repairs inspect or reuse old
+// entries. 0163 is now the fx harness migration, so a 0163 row is cues only
+// when that harness is still absent.
+func repairRenumberedCueMigrationHistory(db *sql.DB) error {
+	var gooseTable int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'`).Scan(&gooseTable); err != nil || gooseTable == 0 {
+		return err
+	}
+	var cueColumns, reviewerColumn, provisionColumns, unrealHarness int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('cues') WHERE name IN ('id', 'project_id', 'name', 'description', 'type', 'command', 'prompt', 'created_at', 'updated_at')`).Scan(&cueColumns); err != nil {
+		return err
+	}
+	if cueColumns != 9 {
+		return nil
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('review') WHERE name = 'interface_mode'`).Scan(&reviewerColumn); err != nil {
+		return err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name IN ('provision_state', 'provision_error')`).Scan(&provisionColumns); err != nil {
+		return err
+	}
+	if err := db.QueryRow(`SELECT instr(sql, 'unreal-agent') FROM sqlite_master WHERE type = 'table' AND name = 'sessions'`).Scan(&unrealHarness); err != nil {
+		return err
+	}
+	var applied149, applied155, applied156, applied159, applied161, applied162, applied163, applied168, discussionCountColumn, fxHarness int
+	for _, item := range []struct {
+		version int
+		result  *int
+	}{{149, &applied149}, {155, &applied155}, {156, &applied156}, {159, &applied159}, {161, &applied161}, {162, &applied162}, {163, &applied163}, {168, &applied168}} {
+		if err := db.QueryRow(`SELECT COALESCE((SELECT is_applied FROM goose_db_version WHERE version_id = ? ORDER BY id DESC LIMIT 1), 0)`, item.version).Scan(item.result); err != nil {
+			return err
+		}
+	}
+	if applied168 != 0 {
+		return nil
+	}
+	if err := db.QueryRow(`SELECT instr(sql, '''fx''') FROM sqlite_master WHERE type = 'table' AND name = 'sessions'`).Scan(&fxHarness); err != nil {
+		return err
+	}
+	if applied163 != 0 && fxHarness != 0 {
+		return nil
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pr') WHERE name = 'discussion_comment_count'`).Scan(&discussionCountColumn); err != nil {
+		return err
+	}
+	oldVersion := 0
+	switch {
+	case applied163 != 0 && fxHarness == 0:
+		oldVersion = 163
+	case applied159 != 0 && discussionCountColumn == 0:
+		oldVersion = 159
+	case applied156 != 0 && provisionColumns != 2:
+		oldVersion = 156
+	case applied155 != 0 && unrealHarness == 0 && provisionColumns != 2:
+		oldVersion = 155
+	case applied149 != 0 && reviewerColumn == 0 && provisionColumns != 2:
+		oldVersion = 149
+	case applied162 != 0:
+		oldVersion = 162
+	case applied161 != 0:
+		oldVersion = 161
+	}
+	if oldVersion == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (168, 1)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM goose_db_version WHERE version_id = ?`, oldVersion); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // repairRenumberedTaskProvisioningMigrationHistory preserves development
@@ -2006,7 +2207,8 @@ func reconcileHarnessConstraint(db *sql.DB) error {
 	needsGemini := !strings.Contains(schema, "'gemini'")
 	needsUnreal := !strings.Contains(schema, "'unreal-agent'")
 	needsMiMo := !strings.Contains(schema, "'mimo-code'")
-	if !needsMuse && !needsKimchi && !needsPrimeAgent && !needsOMP && !needsGemini && !needsUnreal && !needsMiMo {
+	needsDeepSeek := !strings.Contains(schema, "'deepseek-harness'")
+	if !needsMuse && !needsKimchi && !needsPrimeAgent && !needsOMP && !needsGemini && !needsUnreal && !needsMiMo && !needsDeepSeek {
 		return nil
 	}
 	if _, err := db.Exec(`PRAGMA writable_schema = ON`); err != nil {
@@ -2090,6 +2292,15 @@ func reconcileHarnessConstraint(db *sql.DB) error {
 			})
 		}
 	}
+	if needsDeepSeek {
+		// Migration 0166 rewrites the current constraint variants by exact string.
+		// A database that skipped an earlier harness migration matches none of
+		// them, so it reaches this repair with the harness list still missing
+		// entries; goose has already run, so nothing else adds this harness. Every
+		// variant ends with the retained 'fake' fixture harness, so anchor there
+		// instead of enumerating the shapes repaired above.
+		repairs = append(repairs, replacement{"'fake'))", "'deepseek-harness', 'fake'))"})
+	}
 	for _, r := range repairs {
 		if _, err := db.Exec(
 			`UPDATE sqlite_master
@@ -2129,6 +2340,9 @@ WHERE type = 'table' AND name = 'sessions'`,
 	}
 	if !strings.Contains(schema, "'mimo-code'") {
 		return fmt.Errorf("schema repair: sessions harness constraint is missing MiMo Code and did not match known pre-MiMo-Code schema")
+	}
+	if !strings.Contains(schema, "'deepseek-harness'") {
+		return fmt.Errorf("schema repair: sessions harness constraint is missing DeepSeek Harness and did not match known pre-DeepSeek schema")
 	}
 	return nil
 }

@@ -68,6 +68,7 @@ jobs:
         # branch. Broader race suites belong in targeted jobs, not one global
         # all-package invocation with a 20-minute failure horizon.
         run: |
+          go test -count=1 -timeout=5m -run '^TestPocketMigration' ./internal/storage/sqlite
           go test -count=1 -timeout=5m -run '^TestPocket' ./internal/storage/sqlite/store
           go test -count=1 -timeout=5m -run '^TestDeterministicValidation' ./internal/pocket
           go test -count=1 -timeout=5m -run '^(TestSessionExecution|TestDeterministicValidationState)' ./internal/cli

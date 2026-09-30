@@ -53,7 +53,7 @@ The repository-wide `go test -race -count=1 -timeout=20m ./...` suite is intenti
 
 ## Deferred
 
-Android/Termux ARM64, SQLite/Git/worktree validation on the AYN Thor Max, OpenCode runtime validation on-device, Connect Mobile/Tailscale pairing, JEV, DSH, Layla, Shizuku, and broader routing policy are outside Phase 0.
+Android/Termux ARM64, SQLite/Git/worktree validation on the AYN Thor Max, OpenCode runtime validation on-device, Connect Mobile/Tailscale pairing, JEV, DSH routing/evaluation, Layla, Shizuku, and broader routing policy are outside Phase 0. Current upstream now provides native DeepSeek Harness (`deepseek-harness`), OpenCode 2, and Cues; Pocket consumes those upstream implementations and no custom DSH adapter is planned.
 
 ## Thor Runtime + iPhone Remote Control milestone
 
@@ -90,7 +90,7 @@ SQLite and existing Unix process/PTY packages. Connect Mobile already operates
 without Electron and restores credentials/listeners on boot. OpenCode Chat/ACP,
 worktrees, model selection and restore are upstream capabilities. No dependency
 fork, new adapter, replacement mobile client, proot, generated-file edits, JEV,
-DSH, Pi evaluation, Layla, Shizuku, or broad policy work was introduced.
+custom DSH adapter, Pi evaluation, Layla, Shizuku, or broad policy work was introduced. DSH is now supplied by upstream AO.
 
 ### Validation actually performed
 

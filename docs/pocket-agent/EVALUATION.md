@@ -25,23 +25,9 @@ No Pocket Pi performance, cache, recovery or Thor measurements have been run.
 
 ### DeepSeek Harness (DSH)
 
-Inspected upstream: https://github.com/deepseek-ai/deepseek-harness
+Current Agent Orchestrator upstream now ships native `deepseek-harness` support, including the agent adapter and ACP Chat driver. Pocket consumes that upstream implementation directly; no Pocket-specific DSH adapter is planned.
 
-- License: MIT (copyright DeepSeek, 2026).
-- Status: developer preview with compatibility-breaking changes explicitly expected.
-- Headless boundary: `dsh --profile headless` runs one task, exits by outcome, supports
-  newline-delimited JSON with `--json`, and supports durable conversation continuation
-  through `--session-id`.
-- SDK boundary: the official SDK uses newline-delimited JSON-RPC over stdio to open
-  sessions, send prompts and observe session/status events.
-- The official CLI also ships an ACP profile, so ACP is a candidate integration boundary
-  to inspect against AO's existing ACP infrastructure before inventing a custom protocol.
-- No listening server is required by the headless path.
-- Android/Termux compatibility is unknown. The documented Node/runtime path is not proof
-  that the package works on Android.
-
-No cache-hit, latency, cost, success-rate or stability measurement is recorded here.
-Public or vendor claims are not Pocket measurements.
+DSH evaluation is still useful for Thor compatibility, cache behavior, continuity, cost, latency, permissions, recovery and result semantics. It is now an evaluation of upstream-native AO behavior rather than a decision about whether Pocket should design an adapter.
 
 ## Comparable cases
 
@@ -62,10 +48,7 @@ the resolved route rather than fabricating parity.
 
 ## Harness matrix
 
-Run E1-E7 first through OpenCode. Run the same cases through upstream Pi. DSH remains an
-external experimental route; its first evaluation should use the official headless JSON
-surface before any AO adapter is written. If that evidence justifies deeper integration,
-compare the ACP and SDK stdio boundaries and choose the smallest AO-compatible adapter.
+Run E1-E7 first through OpenCode. Run the same cases through upstream Pi and AO's upstream-native DSH integration. DSH remains an experimental Pocket routing candidate until measured on the Thor, but adapter design is no longer Pocket work.
 
 For every run capture, where actually available:
 
@@ -90,5 +73,4 @@ An unavailable metric is `unknown`, never zero.
 A secondary harness is not promoted because it is new, faster in a single anecdote, or
 has a public cache claim. Promotion requires repeatable Pocket measurements for the task
 class in question and no regression in permissions, recovery, result semantics or
-worktree isolation. DSH remains external unless its measured benefit exceeds its adapter
-and maintenance cost.
+worktree isolation. Upstream-native DSH is promoted only where its measured Pocket results justify routing to it; no custom adapter or forked DSH integration is planned.
