@@ -34,6 +34,16 @@ func validPocketExecutionState(state domain.PocketExecutionStateKind) bool {
 	}
 }
 
+func pocketExecutionTerminal(state domain.PocketExecutionStateKind) bool {
+	switch state {
+	case domain.PocketExecutionCompleted, domain.PocketExecutionRecovered, domain.PocketExecutionFailed,
+		domain.PocketExecutionInterrupted, domain.PocketExecutionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func validPocketValidationState(state domain.PocketValidationState) bool {
 	switch state {
 	case domain.PocketValidationPass, domain.PocketValidationFail, domain.PocketValidationUnknown:
@@ -272,6 +282,76 @@ INSERT INTO pocket_executions (
 	return exec, nil
 }
 
+func (s *Store) BindPocketExecutionTurn(ctx context.Context, id, conversationID, turnID string, now time.Time) (domain.PocketExecution, error) {
+	if id == "" || conversationID == "" || turnID == "" {
+		return domain.PocketExecution{}, fmt.Errorf("%w: executionId, conversationId and turnId are required", domain.ErrPocketInvalid)
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	execution, err := scanPocketExecution(s.writeDB.QueryRowContext(ctx, pocketExecutionSelect+" WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PocketExecution{}, fmt.Errorf("%w: execution %s", domain.ErrPocketNotFound, id)
+	}
+	if err != nil {
+		return domain.PocketExecution{}, fmt.Errorf("read pocket execution %s: %w", id, err)
+	}
+	if execution.ConversationID != "" || execution.TurnID != "" {
+		if execution.ConversationID == conversationID && execution.TurnID == turnID {
+			return execution, nil
+		}
+		return domain.PocketExecution{}, fmt.Errorf("%w: execution %s is already bound to %s/%s", domain.ErrPocketConflict, id, execution.ConversationID, execution.TurnID)
+	}
+
+	var turnState string
+	var retryOfTurn sql.NullString
+	if err := s.writeDB.QueryRowContext(ctx, `
+SELECT state, retry_of_turn_id
+FROM conversation_turns
+WHERE id = ? AND conversation_id = ? AND handled_by_session_id = ?`,
+		turnID, conversationID, execution.SessionID).Scan(&turnState, &retryOfTurn); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.PocketExecution{}, fmt.Errorf("%w: turn %s is not owned by session %s in conversation %s", domain.ErrPocketInvalid, turnID, execution.SessionID, conversationID)
+		}
+		return domain.PocketExecution{}, fmt.Errorf("lookup conversation turn %s: %w", turnID, err)
+	}
+	if retryOfTurn.Valid {
+		if execution.PriorExecutionID == "" {
+			return domain.PocketExecution{}, fmt.Errorf("%w: retry turn %s requires prior execution lineage", domain.ErrPocketInvalid, turnID)
+		}
+		var priorTurn string
+		if err := s.writeDB.QueryRowContext(ctx, "SELECT turn_id FROM pocket_executions WHERE id = ?", execution.PriorExecutionID).Scan(&priorTurn); err != nil {
+			return domain.PocketExecution{}, fmt.Errorf("lookup prior execution %s: %w", execution.PriorExecutionID, err)
+		}
+		if priorTurn != retryOfTurn.String {
+			return domain.PocketExecution{}, fmt.Errorf("%w: AO retry turn %s points to %s, not prior execution turn %s", domain.ErrPocketInvalid, turnID, retryOfTurn.String, priorTurn)
+		}
+	}
+	nextState := execution.State
+	if nextState == domain.PocketExecutionUnknown {
+		nextState = domain.PocketExecutionStateKind(turnState)
+	}
+	res, err := s.writeDB.ExecContext(ctx, `
+UPDATE pocket_executions
+SET conversation_id = ?, turn_id = ?, state = ?, updated_at = ?
+WHERE id = ? AND conversation_id = '' AND turn_id = ''`,
+		conversationID, turnID, nextState, now.UTC(), id)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return domain.PocketExecution{}, fmt.Errorf("%w: AO turn is already associated with a Pocket execution", domain.ErrPocketConflict)
+		}
+		return domain.PocketExecution{}, fmt.Errorf("bind pocket execution %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.PocketExecution{}, err
+	}
+	if n == 0 {
+		return domain.PocketExecution{}, fmt.Errorf("%w: execution %s binding changed concurrently", domain.ErrPocketConflict, id)
+	}
+	return scanPocketExecution(s.writeDB.QueryRowContext(ctx, pocketExecutionSelect+" WHERE id = ?", id))
+}
+
 func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state domain.PocketExecutionStateKind, now time.Time) (domain.PocketExecution, error) {
 	if !validPocketExecutionState(state) {
 		return domain.PocketExecution{}, fmt.Errorf("%w: invalid execution state %q", domain.ErrPocketInvalid, state)
@@ -279,6 +359,19 @@ func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state
 	now = now.UTC()
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	current, err := scanPocketExecution(s.writeDB.QueryRowContext(ctx, pocketExecutionSelect+" WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PocketExecution{}, fmt.Errorf("%w: execution %s", domain.ErrPocketNotFound, id)
+	}
+	if err != nil {
+		return domain.PocketExecution{}, fmt.Errorf("read pocket execution %s: %w", id, err)
+	}
+	if pocketExecutionTerminal(current.State) {
+		if current.State == state {
+			return current, nil
+		}
+		return domain.PocketExecution{}, fmt.Errorf("%w: terminal execution %s cannot transition from %s to %s", domain.ErrPocketConflict, id, current.State, state)
+	}
 	var query string
 	switch state {
 	case domain.PocketExecutionRunning:
