@@ -2,11 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 const pocketExecutionSchemaVersion = "pocket.execution.v1"
@@ -100,16 +104,25 @@ type completionPolicyOutput struct {
 	Gates                      []completionGateOutput `json:"gates"`
 }
 
+type executionValidationOutput struct {
+	State    domain.PocketValidationState      `json:"state"`
+	Evidence []domain.PocketValidationEvidence `json:"evidence"`
+}
+
 type sessionExecutionOutput struct {
-	SchemaVersion string                 `json:"schemaVersion"`
-	SessionID     string                 `json:"sessionId"`
-	ProjectID     string                 `json:"projectId,omitempty"`
-	Execution     *executionTurnOutput   `json:"execution"`
-	Profile       executionProfileOutput `json:"profile"`
-	Result        sessionResultOutput    `json:"result"`
-	Usage         executionUsageOutput   `json:"usage"`
-	Policy        completionPolicyOutput `json:"policy"`
-	Unknown       []string               `json:"unknown"`
+	SchemaVersion    string                     `json:"schemaVersion"`
+	SessionID        string                     `json:"sessionId"`
+	ProjectID        string                     `json:"projectId,omitempty"`
+	Task             *domain.PocketTask         `json:"task,omitempty"`
+	Worker           *domain.PocketWorker       `json:"worker,omitempty"`
+	DurableExecution *domain.PocketExecution    `json:"durableExecution,omitempty"`
+	Validation       *executionValidationOutput `json:"validation,omitempty"`
+	Execution        *executionTurnOutput       `json:"execution"`
+	Profile          executionProfileOutput     `json:"profile"`
+	Result           sessionResultOutput        `json:"result"`
+	Usage            executionUsageOutput       `json:"usage"`
+	Policy           completionPolicyOutput     `json:"policy"`
+	Unknown          []string                   `json:"unknown"`
 }
 
 func newSessionExecutionCommand(ctx *commandContext) *cobra.Command {
@@ -155,10 +168,110 @@ func (c *commandContext) sessionExecution(ctx context.Context, cmd *cobra.Comman
 	}
 
 	out := buildSessionExecutionOutput(sess, snapshot, usage)
+	turnID := ""
+	if out.Execution != nil {
+		turnID = out.Execution.ID
+	}
+	durable, found, err := c.fetchPocketExecutionState(ctx, id, turnID)
+	if err != nil {
+		return err
+	}
+	if found {
+		applyDurablePocketState(&out, durable)
+	}
 	if opts.json {
 		return writeJSON(cmd.OutOrStdout(), out)
 	}
 	return writeSessionExecutionText(cmd, out)
+}
+
+func (c *commandContext) fetchPocketExecutionState(ctx context.Context, sessionID, turnID string) (domain.PocketExecutionSnapshot, bool, error) {
+	path := "/internal/pocket/sessions/" + url.PathEscape(sessionID) + "/execution"
+	if turnID != "" {
+		path += "?turnId=" + url.QueryEscape(turnID)
+	}
+	var snapshot domain.PocketExecutionSnapshot
+	if err := c.doJSONPath(ctx, http.MethodGet, path, nil, &snapshot); err != nil {
+		var responseErr apiResponseError
+		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
+			return domain.PocketExecutionSnapshot{}, false, nil
+		}
+		return domain.PocketExecutionSnapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
+func applyDurablePocketState(out *sessionExecutionOutput, snapshot domain.PocketExecutionSnapshot) {
+	task := snapshot.Task
+	worker := snapshot.Worker
+	execution := snapshot.Execution
+	out.Task = &task
+	out.Worker = &worker
+	out.DurableExecution = &execution
+	out.Validation = &executionValidationOutput{
+		State:    snapshot.ValidationState,
+		Evidence: snapshot.Validation,
+	}
+	out.Unknown = removeUnknowns(out.Unknown, "taskId", "workerId", "executionRetryCount", "validationResults")
+
+	state := deterministicValidationState(snapshot.Validation)
+	for i := range out.Policy.Gates {
+		if out.Policy.Gates[i].Name != "deterministic_validation" {
+			continue
+		}
+		out.Policy.Gates[i].State = string(state)
+		switch state {
+		case domain.PocketValidationPass:
+			out.Policy.Gates[i].Reason = "all required deterministic validation checks have authoritative passing evidence"
+		case domain.PocketValidationFail:
+			out.Policy.Gates[i].Reason = "at least one required deterministic validation check has authoritative failing evidence"
+		default:
+			out.Policy.Gates[i].Reason = "required deterministic validation evidence is missing or unknown"
+		}
+		break
+	}
+	if state == domain.PocketValidationFail {
+		out.Policy.State = "blocked"
+	}
+	// This increment supplies evidence only. Durable validation never authorizes
+	// acceptance or Git operations on its own.
+	out.Policy.AutomaticAcceptanceAllowed = false
+	out.Policy.MergeAuthorized = false
+}
+
+func deterministicValidationState(evidence []domain.PocketValidationEvidence) domain.PocketValidationState {
+	seen := false
+	unknown := false
+	for _, item := range evidence {
+		if !item.Requirement.Required || !item.Requirement.Deterministic {
+			continue
+		}
+		seen = true
+		switch item.EffectiveState {
+		case domain.PocketValidationFail:
+			return domain.PocketValidationFail
+		case domain.PocketValidationUnknown:
+			unknown = true
+		}
+	}
+	if !seen || unknown {
+		return domain.PocketValidationUnknown
+	}
+	return domain.PocketValidationPass
+}
+
+func removeUnknowns(values []string, remove ...string) []string {
+	set := make(map[string]struct{}, len(remove))
+	for _, value := range remove {
+		set[value] = struct{}{}
+	}
+	out := values[:0]
+	for _, value := range values {
+		if _, ok := set[value]; !ok {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func buildSessionExecutionOutput(sess sessionDTO, snapshot conversationSnapshotDTO, usage sessionUsageDTO) sessionExecutionOutput {
@@ -361,12 +474,23 @@ func writeSessionExecutionText(cmd *cobra.Command, out sessionExecutionOutput) e
 	if _, err := fmt.Fprintf(w, "session: %s\n", out.SessionID); err != nil {
 		return err
 	}
+	if out.DurableExecution != nil {
+		if _, err := fmt.Fprintf(w, "task: %s; worker: %s; attempt: %s (#%d)\n",
+			out.DurableExecution.TaskID, out.DurableExecution.WorkerID, out.DurableExecution.ID, out.DurableExecution.AttemptNumber); err != nil {
+			return err
+		}
+	}
 	if out.Execution != nil {
 		if _, err := fmt.Fprintf(w, "execution: %s (%s)\n", out.Execution.ID, out.Execution.State); err != nil {
 			return err
 		}
 	} else if _, err := fmt.Fprintln(w, "execution: none"); err != nil {
 		return err
+	}
+	if out.Validation != nil {
+		if _, err := fmt.Fprintf(w, "validation: %s\n", out.Validation.State); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintf(w, "result: %s\n", out.Result.Status); err != nil {
 		return err
