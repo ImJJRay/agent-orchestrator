@@ -228,10 +228,7 @@ func executionTurn(turn conversationTurnDTO, turns []conversationTurnDTO) *execu
 		out.ChangedFilesTruncated = turn.Diff.Truncated
 		out.ChangedFiles = make([]executionChangedFileOutput, 0, len(turn.Diff.Files))
 		for _, file := range turn.Diff.Files {
-			out.ChangedFiles = append(out.ChangedFiles, executionChangedFileOutput{
-				Path: file.Path, OldPath: file.OldPath, Status: file.Status,
-				Additions: file.Additions, Deletions: file.Deletions,
-			})
+			out.ChangedFiles = append(out.ChangedFiles, executionChangedFileOutput(file))
 		}
 	}
 	return out
