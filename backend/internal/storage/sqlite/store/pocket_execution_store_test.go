@@ -244,6 +244,16 @@ func TestPocketDeterministicValidationCannotBeOverriddenBySemanticEvidence(t *te
 	}
 	// Only newer authoritative deterministic evidence changes the outcome.
 	assertState(domain.PocketValidationPass)
+
+	if _, err := s.CreatePocketValidationResult(
+		ctx, execution.ID, req.ID, domain.PocketValidationUnknown, domain.PocketValidationDeterministic,
+		"go test ./focused", "runner lost the result", base.Add(5*time.Minute), base.Add(5*time.Minute),
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit unknown is a first-class latest result; it must not fall back to
+	// the older pass.
+	assertState(domain.PocketValidationUnknown)
 }
 
 func TestPocketTerminalExecutionStateIsImmutable(t *testing.T) {
