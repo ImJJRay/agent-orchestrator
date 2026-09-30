@@ -879,6 +879,7 @@ func Run() error {
 		Activity:           lcStack.LCM,
 		UsageHooks:         usageCollector,
 		UsageSummary:       usagesvc.NewSummaryReader(store),
+		PocketState:        store,
 		Telemetry:          telemetrySink,
 		Mobile:             mc,
 		DevImport: devimportsvc.New(devimportsvc.Deps{

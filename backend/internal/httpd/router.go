@@ -81,6 +81,7 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 	mountControl(r, control)
 	mountAgentSwitchPolicyControl(r, control.AgentSwitchPolicy)
 	mountTelemetry(r, cfg, deps.Telemetry)
+	mountPocketState(r, deps.PocketState)
 	mountMobile(r, deps.Mobile)
 	mountMobileDevices(r, &controllers.MobileDevicesController{Registry: deps.DeviceRoster, Presence: deps.DeviceLive})
 	api.Register(r)
@@ -197,6 +198,26 @@ func mountControl(r chi.Router, deps ControlDeps) {
 		// /shutdown request itself as still active and wait until its graceful
 		// deadline under the race detector.
 		time.AfterFunc(10*time.Millisecond, deps.RequestShutdown)
+	})
+}
+
+// mountPocketState registers the Pocket durable-state surface on loopback only.
+func mountPocketState(r chi.Router, svc controllers.PocketStateService) {
+	if svc == nil {
+		return
+	}
+	controller := &controllers.PocketStateController{Svc: svc}
+	r.Group(func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if !localControlRequest(req) {
+					envelope.WriteJSON(w, http.StatusForbidden, map[string]any{"status": "forbidden"})
+					return
+				}
+				next.ServeHTTP(w, req)
+			})
+		})
+		controller.Register(r)
 	})
 }
 

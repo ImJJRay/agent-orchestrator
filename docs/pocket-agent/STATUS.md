@@ -149,7 +149,7 @@ independent backend/control-plane work. New implementation work starts from curr
 `quant-main` remain untouched.
 
 
-## Execution evidence and deterministic completion pre-gates — pending PR
+## Execution evidence and deterministic completion pre-gates — merged via PR #5
 
 Feature branch base: `pocket-main` @
 `18347f4d549c1767dbabe5fb2e51182a5c21bb56`.
@@ -198,3 +198,68 @@ currently exposes `POST https://api.typesafe.ai/v1/systemone` and
 `GET https://api.typesafe.ai/v1/models` with bearer authentication. Dynamic model
 discovery is therefore possible, but no credential or live availability has been
 assumed or tested.
+
+
+## Durable task/execution state and validation evidence — pending PR
+
+Feature branch base: `pocket-main` @
+`69f2b00e8a59ca0949cf75fb9bfe6dc7011f159b` (PR #5 merged).
+
+### Implemented on this feature branch
+
+- Added Pocket durable records inside AO's existing SQLite control plane for:
+  - task identity and task state;
+  - logical worker identity;
+  - execution/attempt identity and ordered attempt number;
+  - explicit prior-attempt lineage;
+  - task-scoped and execution-scoped validation requirements;
+  - append-only validation results with `pass`, `fail`, or `unknown`,
+    observation timestamp, source kind, source/provenance and detail.
+- Pocket execution rows retain their owning AO session plus project/worktree snapshots.
+  When a Chat turn exists, the execution is explicitly bound to its durable AO
+  conversation and turn. A retry turn is accepted only when AO's own
+  `retry_of_turn_id` agrees with the Pocket prior-attempt relation.
+- Executions may be created before a provider turn and bound to that turn later.
+  Completed/recovered/failed/interrupted/cancelled attempts are terminal and cannot
+  be rewritten into another terminal outcome.
+- Missing required validation evidence remains `unknown`. For a deterministic
+  requirement, only deterministic-source results can become its effective result.
+  Semantic/model evidence is retained for audit but cannot override a deterministic
+  failure or satisfy a missing deterministic result. A newer deterministic rerun may
+  legitimately supersede an older deterministic result.
+- Added a loopback-only internal Pocket state API. It reuses AO's existing daemon,
+  session, conversation, project and worktree facts and does not expand the mobile
+  or public `/api/v1` surface.
+- `ao session execution <id> --json` now overlays durable Pocket state when the
+  current Chat turn has a matching execution:
+  - `task`
+  - `worker`
+  - `durableExecution`
+  - full task `attempts`
+  - validation aggregate plus per-check requirement/results/provenance
+- Existing turn/result/session-usage fields remain intact. If no Pocket execution
+  exists, the command keeps the PR #5 legacy behavior and reports task/worker/
+  validation facts as unknown rather than failing or inventing records.
+- Durable deterministic validation now feeds the existing
+  `deterministic_validation` completion gate. A fail forces `blocked`; unknown
+  remains unknown. `automaticAcceptanceAllowed` and `mergeAuthorized` remain
+  false unconditionally in this increment.
+
+### Tests added
+
+- SQLite close/reopen persistence for task, worker, execution IDs, AO trace,
+  attempt lineage, validation requirements and validation results.
+- Retry lineage checked against the durable AO retry-turn relationship.
+- Missing validation evidence and explicit `unknown` handling.
+- Semantic/model evidence cannot satisfy or override a deterministic check.
+- Terminal execution outcome immutability.
+- Legacy session behavior when no Pocket execution record exists.
+- CLI durable-state overlay and deterministic-failure blocking.
+
+### Deliberately not implemented
+
+No model routing/ranking, JEV, worker/session reuse policy, cache-aware routing,
+dependency-aware planning, automatic acceptance, Git merge authorization,
+per-execution token accounting, or dependency graph is added here. Session usage
+remains explicitly session-scoped until AO has an authoritative execution-level
+ledger.

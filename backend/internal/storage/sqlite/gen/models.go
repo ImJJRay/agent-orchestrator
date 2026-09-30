@@ -521,6 +521,65 @@ type PRURLAlias struct {
 	CanonicalURL string
 }
 
+type PocketExecution struct {
+	ID                string
+	TaskID            string
+	WorkerID          string
+	AttemptNumber     int64
+	PriorExecutionID  sql.NullString
+	SessionID         string
+	ConversationID    string
+	TurnID            string
+	ProjectID         string
+	WorkspacePath     string
+	WorkspaceRepoPath string
+	State             string
+	StartedAt         sql.NullTime
+	CompletedAt       sql.NullTime
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type PocketTask struct {
+	ID        string
+	ProjectID string
+	Objective string
+	State     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type PocketValidationRequirement struct {
+	ID            string
+	TaskID        string
+	ExecutionID   sql.NullString
+	Scope         string
+	CheckID       string
+	Description   string
+	Deterministic bool
+	Required      bool
+	CreatedAt     time.Time
+}
+
+type PocketValidationResult struct {
+	ID            string
+	RequirementID string
+	TaskID        string
+	ExecutionID   string
+	State         string
+	SourceKind    string
+	Source        string
+	Detail        string
+	ObservedAt    time.Time
+	CreatedAt     time.Time
+}
+
+type PocketWorker struct {
+	ID        string
+	SessionID string
+	CreatedAt time.Time
+}
+
 type Project struct {
 	ID            domain.ProjectID
 	Path          string

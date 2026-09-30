@@ -32,6 +32,7 @@ type APIDeps struct {
 	Activity           controllers.ActivityRecorder
 	UsageHooks         controllers.UsageHookRecorder
 	UsageSummary       controllers.UsageSummaryService
+	PocketState        controllers.PocketStateService
 	PRs                prsvc.ActionManager
 	Reviews            reviewsvc.Manager
 	Notifications      controllers.NotificationService
