@@ -26,7 +26,8 @@ func validPocketTaskState(state domain.PocketTaskState) bool {
 func validPocketExecutionState(state domain.PocketExecutionStateKind) bool {
 	switch state {
 	case domain.PocketExecutionUnknown, domain.PocketExecutionQueued, domain.PocketExecutionRunning,
-		domain.PocketExecutionCompleted, domain.PocketExecutionFailed, domain.PocketExecutionInterrupted:
+		domain.PocketExecutionCompleted, domain.PocketExecutionRecovered, domain.PocketExecutionFailed,
+		domain.PocketExecutionInterrupted, domain.PocketExecutionCancelled:
 		return true
 	default:
 		return false
@@ -282,7 +283,8 @@ func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state
 	switch state {
 	case domain.PocketExecutionRunning:
 		query = `UPDATE pocket_executions SET state = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?`
-	case domain.PocketExecutionCompleted, domain.PocketExecutionFailed, domain.PocketExecutionInterrupted:
+	case domain.PocketExecutionCompleted, domain.PocketExecutionRecovered, domain.PocketExecutionFailed,
+		domain.PocketExecutionInterrupted, domain.PocketExecutionCancelled:
 		query = `UPDATE pocket_executions SET state = ?, started_at = COALESCE(started_at, ?), completed_at = ?, updated_at = ? WHERE id = ?`
 	default:
 		query = `UPDATE pocket_executions SET state = ?, updated_at = ? WHERE id = ?`
@@ -292,7 +294,8 @@ func (s *Store) UpdatePocketExecutionState(ctx context.Context, id string, state
 	switch state {
 	case domain.PocketExecutionRunning:
 		res, err = s.writeDB.ExecContext(ctx, query, state, now, now, id)
-	case domain.PocketExecutionCompleted, domain.PocketExecutionFailed, domain.PocketExecutionInterrupted:
+	case domain.PocketExecutionCompleted, domain.PocketExecutionRecovered, domain.PocketExecutionFailed,
+		domain.PocketExecutionInterrupted, domain.PocketExecutionCancelled:
 		res, err = s.writeDB.ExecContext(ctx, query, state, now, now, now, id)
 	default:
 		res, err = s.writeDB.ExecContext(ctx, query, state, now, id)
