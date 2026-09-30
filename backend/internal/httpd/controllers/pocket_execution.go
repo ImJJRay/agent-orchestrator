@@ -22,6 +22,7 @@ type PocketStateService interface {
 	UpdatePocketTaskState(context.Context, string, domain.PocketTaskState, time.Time) (domain.PocketTask, error)
 	CreatePocketWorker(context.Context, domain.SessionID, time.Time) (domain.PocketWorker, error)
 	CreatePocketExecution(context.Context, string, string, string, string, string, domain.PocketExecutionStateKind, time.Time) (domain.PocketExecution, error)
+	BindPocketExecutionTurn(context.Context, string, string, string, time.Time) (domain.PocketExecution, error)
 	UpdatePocketExecutionState(context.Context, string, domain.PocketExecutionStateKind, time.Time) (domain.PocketExecution, error)
 	CreatePocketValidationRequirement(context.Context, string, string, string, string, domain.PocketValidationScope, bool, bool, time.Time) (domain.PocketValidationRequirement, error)
 	CreatePocketValidationResult(context.Context, string, string, domain.PocketValidationState, domain.PocketValidationSourceKind, string, string, time.Time, time.Time) (domain.PocketValidationResult, error)
@@ -49,6 +50,7 @@ func (c *PocketStateController) Register(r chi.Router) {
 	r.Patch("/internal/pocket/tasks/{taskId}", c.updateTask)
 	r.Post("/internal/pocket/workers", c.createWorker)
 	r.Post("/internal/pocket/tasks/{taskId}/executions", c.createExecution)
+	r.Post("/internal/pocket/executions/{executionId}/turn", c.bindExecutionTurn)
 	r.Patch("/internal/pocket/executions/{executionId}", c.updateExecution)
 	r.Post("/internal/pocket/tasks/{taskId}/validation-requirements", c.createValidationRequirement)
 	r.Post("/internal/pocket/executions/{executionId}/validation-results", c.createValidationResult)
@@ -74,6 +76,11 @@ type createPocketExecutionRequest struct {
 	TurnID            string                          `json:"turnId"`
 	PriorExecutionID  string                          `json:"priorExecutionId"`
 	State             domain.PocketExecutionStateKind `json:"state"`
+}
+
+type bindPocketExecutionTurnRequest struct {
+	ConversationID string `json:"conversationId"`
+	TurnID         string `json:"turnId"`
 }
 
 type updatePocketExecutionRequest struct {
@@ -159,6 +166,22 @@ func (c *PocketStateController) createExecution(w http.ResponseWriter, r *http.R
 		return
 	}
 	envelope.WriteJSON(w, http.StatusCreated, execution)
+}
+
+func (c *PocketStateController) bindExecutionTurn(w http.ResponseWriter, r *http.Request) {
+	var req bindPocketExecutionTurnRequest
+	if err := decodeJSONStrict(r, &req); err != nil {
+		writePocketBadJSON(w, r)
+		return
+	}
+	execution, err := c.Svc.BindPocketExecutionTurn(
+		r.Context(), chi.URLParam(r, "executionId"), req.ConversationID, req.TurnID, c.now(),
+	)
+	if err != nil {
+		writePocketError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, execution)
 }
 
 func (c *PocketStateController) updateExecution(w http.ResponseWriter, r *http.Request) {
