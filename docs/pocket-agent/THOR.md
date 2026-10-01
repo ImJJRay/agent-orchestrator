@@ -1,9 +1,6 @@
 # Thor Runtime + iPhone Remote Control
 
-This is the deployment runbook for `pocket-main`. Native Android ARM64 compilation
-and Linux runtime checks have passed. **No physical Thor or iPhone validation has
-been performed.** The final acceptance is the device procedure below, not the
-cross-build alone.
+This is the deployment runbook for `pocket-main`. Native Android ARM64 compilation and Linux runtime checks have passed. Physical AYN Thor Max validation has now passed for the native Termux AO build/daemon, isolated SQLite/Git/worktrees, Connect Mobile local boundary, OpenCode v2 ACP Chat, real worker execution, durable result, daemon restart/session restore/follow-up, and the PR #9 deterministic orchestration core. Optional TUI and Tailscale/iPhone off-LAN acceptance remain pending; cross-builds alone are not evidence for those paths.
 
 ## What is reused
 
@@ -116,6 +113,18 @@ OPENCODE/OPENCODE_CHAT diagnostic and native executable version. Do not install
 proot merely to hide an uninvestigated failure. An alternate native package can
 be used if it provides the same `opencode`/ACP interface; the validator is the
 acceptance contract.
+
+## Physical PR #9 deterministic orchestration acceptance
+
+Completed on 2026-09-30 on the physical AYN Thor Max using native Termux and an isolated `AO_DATA_DIR=$HOME/.ao-pocket`. The source checkout was merged `pocket-main` at `7ad91bc8` (PR #9). The native binary was rebuilt through `bootstrap-termux.sh` and launched through `thor.sh`. OpenCode v2 ACP used harness `opencode-v2` with model `opencode/space-bunny-free`.
+
+The acceptance repository used a local bare Git origin and two explicit AO Chat workers with isolated worktrees/branches: `pocket-pr9-primary` and `pocket-pr9-escalation`. Both workers first completed independent real ACP smoke turns. The policy test then created Task B with a durable dependency on Task A and configured B for three maximum attempts, one retry, one escalation, the primary session as root target and the second session as the explicit escalation target.
+
+A task-scoped deterministic validation command was intentionally branch-sensitive: it failed on `pocket-pr9-primary` and passed only on `pocket-pr9-escalation`. B remained `BLOCKED / dependencies_not_satisfied` with zero attempts until A was explicitly marked `completed`. With automation disabled after dependency release, B derived `READY` without starting. Enabling automation produced the expected bounded path: primary attempt 1 failed validation and authorized `RETRY`; primary attempt 2 failed and authorized `ESCALATE`; attempt 3 ran on the explicit escalation worker and passed validation. Successful deterministic validation ended at `NEEDS_USER / task_acceptance_required`, preserving human task-acceptance authority.
+
+Final durable counters were exactly three attempts, one retry and one escalation. Decision history retained the authorizing `READY -> RETRY -> ESCALATE` path. AO was then stopped and restarted through `thor.sh` against the same SQLite state. After reconciliation the task remained `NEEDS_USER / task_acceptance_required`, counters remained 3/1/1, the latest execution and turn IDs were unchanged, all action decision/execution/session identities were unchanged, and no fourth attempt was created. This physically validates the PR #9 restart/idempotency contract on Android/Termux.
+
+Non-blocking observation: while an attempt is active, decision history can accumulate many repeated `BLOCKED / execution_in_progress` snapshots. This did not create duplicate actions or attempts, but the audit stream is noisier than desirable and should be tightened separately for observability/storage usability.
 
 ## Private Tailscale HTTPS
 
