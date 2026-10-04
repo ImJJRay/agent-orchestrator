@@ -11,13 +11,21 @@ import (
 )
 
 func TestPocketLifecycleUnchangedPollsPreserveAudit(t *testing.T) {
-	for _, state := range []domain.TurnState{domain.TurnStateQueued, domain.TurnStateRunning, domain.TurnStateCompleted} {
-		for _, missingWorkspace := range []bool{false, true} {
-			name := string(state) + "/bound"
-			if missingWorkspace {
-				name = string(state) + "/awaiting-workspace"
-			}
-			t.Run(name, func(t *testing.T) {
+	for _, state := range []domain.TurnState{
+		domain.TurnStateQueued, domain.TurnStateRunning, domain.TurnStateCompleted,
+		domain.TurnStateRecovered, domain.TurnStateFailed, domain.TurnStateInterrupted, domain.TurnStateCancelled,
+	} {
+		for _, workspace := range []struct {
+			name        string
+			missingPath bool
+			missingRepo bool
+		}{
+			{name: "bound"},
+			{name: "awaiting-path", missingPath: true},
+			{name: "awaiting-repo", missingRepo: true},
+			{name: "awaiting-both", missingPath: true, missingRepo: true},
+		} {
+			t.Run(string(state)+"/"+workspace.name, func(t *testing.T) {
 				ctx := context.Background()
 				dataDir := t.TempDir()
 				s, err := sqlite.Open(dataDir)
@@ -30,9 +38,13 @@ func TestPocketLifecycleUnchangedPollsPreserveAudit(t *testing.T) {
 				if err != nil || !ok {
 					t.Fatalf("get session: ok=%v err=%v", ok, err)
 				}
-				if missingWorkspace {
+				if workspace.missingPath {
 					rec.Metadata.WorkspacePath = ""
+				}
+				if workspace.missingRepo {
 					rec.Metadata.WorkspaceRepoPath = ""
+				}
+				if workspace.missingPath || workspace.missingRepo {
 					if err := s.UpdateSession(ctx, rec); err != nil {
 						t.Fatal(err)
 					}
@@ -43,7 +55,8 @@ func TestPocketLifecycleUnchangedPollsPreserveAudit(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if state == domain.TurnStateCompleted {
+				terminal := state != domain.TurnStateQueued && state != domain.TurnStateRunning
+				if terminal {
 					if err := s.SettleTurnByID(ctx, fixture.turn2, state, "", now); err != nil {
 						t.Fatal(err)
 					}
@@ -85,23 +98,27 @@ func TestPocketLifecycleUnchangedPollsPreserveAudit(t *testing.T) {
 				assertStable()
 
 				// Late AO facts must still produce a new immutable audit snapshot.
-				if missingWorkspace {
-					rec.Metadata.WorkspacePath = "/late/worktree"
-					rec.Metadata.WorkspaceRepoPath = "/late/repo"
+				if workspace.missingPath || workspace.missingRepo {
+					if workspace.missingPath {
+						rec.Metadata.WorkspacePath = "/late/worktree"
+					}
+					if workspace.missingRepo {
+						rec.Metadata.WorkspaceRepoPath = "/late/repo"
+					}
 					if err := s.UpdateSession(ctx, rec); err != nil {
 						t.Fatal(err)
 					}
 					after := reconcile()
 					if len(after.Decisions) != len(before.Decisions)+1 ||
-						after.Facts.Latest.WorkspacePath != "/late/worktree" ||
-						after.Facts.Latest.WorkspaceRepoPath != "/late/repo" ||
+						after.Facts.Latest.WorkspacePath != rec.Metadata.WorkspacePath ||
+						after.Facts.Latest.WorkspaceRepoPath != rec.Metadata.WorkspaceRepoPath ||
 						!after.Facts.Latest.UpdatedAt.After(before.Facts.Latest.UpdatedAt) {
 						t.Fatalf("late workspace facts not recorded: %#v", after.Facts.Latest)
 					}
 					before = after
 					assertStable()
 				}
-				if state != domain.TurnStateCompleted {
+				if !terminal {
 					if err := s.SettleTurnByID(ctx, fixture.turn2, domain.TurnStateCompleted, "", now); err != nil {
 						t.Fatal(err)
 					}

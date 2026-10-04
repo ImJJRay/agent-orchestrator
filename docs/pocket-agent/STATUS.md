@@ -48,6 +48,21 @@ were not replaced. An isolated native binary is available at
 Next implementation increment: execution/attempt-scoped usage and cost evidence,
 with unknown provider counters kept explicit, before JEV or cache-aware routing.
 
+### Review follow-up (2026-10-04)
+
+Reviewed `e00df135f` against `7ad91bc8d`, including SQL null/empty semantics,
+update parameter ordering, policy fingerprinting, terminal-state preservation,
+action reservation and validation boundaries. No blocking correctness findings
+were identified. This is a review of the local fix, not a merge or deployment.
+
+Expanded the audit regression from six to 28 cases: queued/running plus every
+terminal outcome, with both workspace fields populated, either field missing,
+or both missing. All cases verify unchanged polling before and after database
+reopen; late workspace facts still create a decision, and nonterminal attempts
+still project completion. The complete `^TestPocket` storage and coordinator
+selections passed on Windows and the physical Thor. The earlier race/full-CI
+limitations remain.
+
 ## Baseline
 
 - Upstream mirror `main`: `b188dd3bf03c331e01cb1c43f93163811cd33a15`.
