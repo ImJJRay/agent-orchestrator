@@ -1,8 +1,67 @@
 # Pocket Agent Orchestrator — Project Status
 
-Updated: 2026-09-30
+Updated: 2026-10-04
 
 This file records Pocket Agent project state only. Upstream product status remains in `docs/STATUS.md`.
+
+## Audit polling stability — follow-up to Thor acceptance
+
+Branch: `fix/pocket-audit-stability`, based on `pocket-main` at `7ad91bc8d`.
+This is a separate follow-up to the acceptance/validator work in PR #10; that PR
+was still open at inspection. Neither change is assumed merged by this entry.
+
+The saved Thor acceptance evidence showed repeated decisions with unchanged
+policy facts except the execution's `updatedAt`. Lifecycle reconciliation wrote
+that timestamp every second for queued/running executions and for completed
+executions whose optional workspace fields remained empty. Because the decision
+fingerprint includes the execution, these writes defeated audit deduplication.
+
+Reconciliation now writes only when it projects a changed durable fact. The
+existing decision fingerprint and immutable history are preserved. Real state,
+timestamp and late workspace updates continue to produce audit evidence; old
+duplicate history is not rewritten or deleted.
+
+Validation on 2026-10-04 (local date), Go 1.27.1:
+
+- The new six-case lifecycle/audit regression was run on the physical AYN Thor
+  in native Termux against the original implementation: five cases failed by
+  adding a second decision after one unchanged poll; completed/bound was the
+  passing control. All six pass with the fix, including repeated polls,
+  database close/reopen, late workspace binding and completion transitions.
+- Windows: backend `go build ./...`, `go vet ./...`, and the bounded Pocket
+  storage, migration, coordinator, CLI, HTTP and Chat gates passed.
+- Thor Android/ARM64: backend `go build ./...`, `go vet ./...`, native CLI
+  build/version check, Pocket storage/migration/CLI/HTTP/Chat regressions and
+  the complete coordinator package tests passed.
+- Windows race testing could not run: CGO is disabled and no GCC is installed.
+  No repository-wide test, full CI, or live-provider acceptance pass is claimed.
+- Pinned golangci-lint v2.13.2 reported zero new findings with
+  `--new-from-rev=origin/pocket-main`. Full Windows lint failed with 1,529
+  repository findings (1,482 goimports findings plus platform/code warnings);
+  this change does not claim to clear that baseline.
+
+Device tests used an isolated checkout and temporary databases. The existing
+Thor checkout, its local validator edits, Cocoon and the installed AO binary
+were not replaced. An isolated native binary is available at
+`~/.ao/pocket-audit-check/bin/ao`.
+
+Next implementation increment: execution/attempt-scoped usage and cost evidence,
+with unknown provider counters kept explicit, before JEV or cache-aware routing.
+
+### Review follow-up (2026-10-04)
+
+Reviewed `e00df135f` against `7ad91bc8d`, including SQL null/empty semantics,
+update parameter ordering, policy fingerprinting, terminal-state preservation,
+action reservation and validation boundaries. No blocking correctness findings
+were identified. This is a review of the local fix, not a merge or deployment.
+
+Expanded the audit regression from six to 28 cases: queued/running plus every
+terminal outcome, with both workspace fields populated, either field missing,
+or both missing. All cases verify unchanged polling before and after database
+reopen; late workspace facts still create a decision, and nonterminal attempts
+still project completion. The complete `^TestPocket` storage and coordinator
+selections passed on Windows and the physical Thor. The earlier race/full-CI
+limitations remain.
 
 ## Baseline
 

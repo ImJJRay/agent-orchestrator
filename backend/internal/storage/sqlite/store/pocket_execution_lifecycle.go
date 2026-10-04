@@ -481,6 +481,8 @@ WHERE execution.turn_id <> ''
 		if item.completedAt.Valid {
 			completedAt = item.completedAt.Time.UTC()
 		}
+		// The policy fingerprint includes UpdatedAt. Unchanged polls, including
+		// incomplete workspaces, must not advance it.
 		if _, err := tx.ExecContext(ctx, `
 UPDATE pocket_executions
 SET
@@ -495,7 +497,16 @@ SET
         ELSE completed_at
     END,
     updated_at = ?
-WHERE id = ?`,
+WHERE id = ?
+  AND (
+      (project_id = '' AND ? <> '')
+      OR (workspace_path = '' AND ? <> '')
+      OR (workspace_repo_path = '' AND ? <> '')
+      OR state <> ?
+      OR (started_at IS NULL AND ? IS NOT NULL)
+      OR (completed_at IS NULL AND ? IS NOT NULL
+          AND ? IN ('completed', 'recovered', 'failed', 'interrupted', 'cancelled'))
+  )`,
 			item.projectID,
 			item.workspacePath,
 			item.workspaceRepoPath,
@@ -505,6 +516,13 @@ WHERE id = ?`,
 			completedAt,
 			now.UTC(),
 			item.id,
+			item.projectID,
+			item.workspacePath,
+			item.workspaceRepoPath,
+			next,
+			startedAt,
+			completedAt,
+			next,
 		); err != nil {
 			return fmt.Errorf("reconcile Pocket execution %s: %w", item.id, err)
 		}
