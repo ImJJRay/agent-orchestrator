@@ -121,3 +121,36 @@ func TestPocketMigrationTrackDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestPocketMigrationTelemetryAfterUpstreamIntegration(t *testing.T) {
+	db := openMigratedDatabaseCopy(t, 174)
+	func() {
+		gooseMu.Lock()
+		defer gooseMu.Unlock()
+		goose.SetBaseFS(pocketMigrationsFS)
+		goose.SetTableName(pocketMigrationTable)
+		defer goose.SetBaseFS(migrationsFS)
+		defer goose.SetTableName("goose_db_version")
+		if err := goose.UpTo(db, "migrations", 171, goose.WithAllowMissing()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	mustExec(t, db, `INSERT INTO pocket_tasks(id,objective,created_at,updated_at) VALUES ('retained','unchanged',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+	for range 3 {
+		if err := migrate(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM pocket_tasks WHERE id='retained' AND objective='unchanged'`,
+		`SELECT COUNT(*) FROM pragma_table_info('model_usage_events') WHERE name='native_turn_id' AND dflt_value="''" AND "notnull"=1`,
+		`SELECT COUNT(*) FROM sqlite_master WHERE name='idx_model_usage_events_native_turn'`,
+		`SELECT COUNT(*) FROM pocket_goose_db_version WHERE version_id=172 AND is_applied=1`,
+		`SELECT COUNT(*) FROM goose_db_version WHERE version_id=174 AND is_applied=1`,
+	} {
+		var count int
+		if err := db.QueryRow(query).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s: count=%d err=%v", query, count, err)
+		}
+	}
+}

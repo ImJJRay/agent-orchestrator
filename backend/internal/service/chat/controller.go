@@ -2658,6 +2658,7 @@ func (c *Controller) projectEvent(ctx context.Context, event ports.ChatEvent) (b
 		"kind":                   event.Kind,
 		"providerEventId":        event.ProviderEventID,
 		"providerTurnId":         event.ProviderTurnID,
+		"nativeTurnId":           event.NativeTurnID,
 		"providerConversationId": event.ProviderConversationID,
 		"providerItemId":         event.ProviderItemID,
 		"providerItemAliases":    event.ProviderItemAliases,

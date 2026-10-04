@@ -74,7 +74,7 @@ func (r *SummaryReader) Get(ctx context.Context, sessionID domain.SessionID) (do
 	if err != nil {
 		return domain.SessionUsageSummary{}, err
 	}
-	totals, err := usageTotals(models)
+	totals, err := SummarizeModels(models)
 	if err != nil {
 		return domain.SessionUsageSummary{}, err
 	}
@@ -87,7 +87,8 @@ func (r *SummaryReader) Get(ctx context.Context, sessionID domain.SessionID) (do
 	}, nil
 }
 
-func usageTotals(models []domain.UsageModelAggregate) (domain.UsageMetricTotals, error) {
+// SummarizeModels derives token totals and cost coverage from normalized events.
+func SummarizeModels(models []domain.UsageModelAggregate) (domain.UsageMetricTotals, error) {
 	if len(models) == 0 {
 		return domain.UsageMetricTotals{}, nil
 	}
@@ -145,13 +146,13 @@ func harnessUsageSummaries(models []domain.UsageModelAggregate) ([]domain.Harnes
 	out := make([]domain.HarnessUsageSummary, 0, len(order))
 	for _, harness := range order {
 		rows := grouped[harness]
-		totals, err := usageTotals(rows)
+		totals, err := SummarizeModels(rows)
 		if err != nil {
 			return nil, err
 		}
 		summary := domain.HarnessUsageSummary{Harness: harness, Totals: totals}
 		for _, row := range rows {
-			modelTotals, err := usageTotals([]domain.UsageModelAggregate{row})
+			modelTotals, err := SummarizeModels([]domain.UsageModelAggregate{row})
 			if err != nil {
 				return nil, err
 			}

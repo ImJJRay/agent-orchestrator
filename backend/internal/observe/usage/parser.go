@@ -126,6 +126,7 @@ type claudeParserStateV1 struct {
 }
 
 type codexParserStateV1 struct {
+	NativeTurnID   string           `json:"native_turn_id,omitempty"`
 	Baseline       codexTokenVector `json:"baseline"`
 	ModelID        string           `json:"model_id,omitempty"`
 	Provider       string           `json:"billing_provider,omitempty"`
@@ -390,11 +391,14 @@ func parseCodex(source domain.UsageSourceContext, records []jsonlRecord, state *
 	for _, record := range records {
 		var envelope codexEnvelope
 		if err := json.Unmarshal(record.Data, &envelope); err != nil {
+			// A damaged record may have been the next turn's boundary.
+			state.NativeTurnID = ""
 			recordMalformed(result)
 			continue
 		}
 		switch envelope.Type {
 		case "session_meta":
+			state.NativeTurnID = ""
 			var payload struct {
 				ModelProvider string `json:"model_provider"`
 			}
@@ -403,10 +407,15 @@ func parseCodex(source domain.UsageSourceContext, records []jsonlRecord, state *
 			}
 		case "turn_context":
 			var payload struct {
-				Model string `json:"model"`
+				Model  string `json:"model"`
+				TurnID string `json:"turn_id"`
 			}
+			state.NativeTurnID = ""
 			if json.Unmarshal(envelope.Payload, &payload) == nil {
 				state.ModelID = firstNonEmpty(payload.Model, state.ModelID)
+				if len(payload.TurnID) <= maxCodexAttributionIDBytes {
+					state.NativeTurnID = payload.TurnID
+				}
 			}
 		case "event_msg":
 			parseCodexEvent(source, envelope, state, result)
@@ -462,6 +471,9 @@ func parseCodexResponseItem(raw json.RawMessage, state *codexParserStateV1, resu
 }
 
 func normalizeCodexParserState(state *codexParserStateV1) error {
+	if len(state.NativeTurnID) > maxCodexAttributionIDBytes {
+		return errors.New("native turn identity is too long")
+	}
 	pending, err := normalizeCodexIDs(state.PendingSpawnCallIDs, validCodexCallID)
 	if err != nil {
 		return fmt.Errorf("invalid pending spawn call ids: %w", err)
@@ -603,8 +615,16 @@ func parseCodexEvent(source domain.UsageSourceContext, envelope codexEnvelope, s
 		Type string          `json:"type"`
 		Info json.RawMessage `json:"info"`
 	}
-	if err := json.Unmarshal(envelope.Payload, &payload); err != nil ||
-		payload.Type != "token_count" || !jsonValueReported(payload.Info) {
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		state.NativeTurnID = ""
+		return
+	}
+	if payload.Type == "task_started" || payload.Type == "task_complete" || payload.Type == "turn_aborted" {
+		// A new turn must establish its own turn_context. Never carry an identity
+		// across completion, cancellation, or an unrecognized next turn.
+		state.NativeTurnID = ""
+	}
+	if payload.Type != "token_count" || !jsonValueReported(payload.Info) {
 		return
 	}
 	var info struct {
@@ -697,7 +717,14 @@ func parseCodexEvent(source domain.UsageSourceContext, envelope codexEnvelope, s
 	state.Baseline = total
 	model := firstNonEmpty(state.ModelID, source.InitialModelID, "unknown")
 	state.ModelID = model
+	// Only a provider-reported per-request vector can be assigned to the
+	// enclosing turn. A cumulative delta could include earlier unobserved work.
+	nativeTurnID := ""
+	if info.Last != nil && codexVectorMatchesDelta(*info.Last, input, cached, cacheWrite, output, reasoning, reportedTotal) {
+		nativeTurnID = state.NativeTurnID
+	}
 	event := domain.ModelUsageEvent{
+		NativeTurnID:          nativeTurnID,
 		ProviderID:            domain.UsageProviderOpenAI,
 		BillingProviderID:     canonicalBillingProvider(state.Provider),
 		BillingProviderSource: domain.ObservedBillingProviderSource(canonicalBillingProvider(state.Provider)),

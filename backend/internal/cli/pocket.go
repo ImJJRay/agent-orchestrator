@@ -69,5 +69,6 @@ func newPocketCommand(c *commandContext) *cobra.Command {
 		child.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 		cmd.AddCommand(child)
 	}
+	cmd.AddCommand(newPocketTelemetryCommand(c))
 	return cmd
 }

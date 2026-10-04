@@ -49,6 +49,7 @@ func (c *PocketStateController) Register(r chi.Router) {
 	r.Post("/internal/pocket/tasks", c.createTask)
 	r.Get("/internal/pocket/tasks/{taskId}/policy", c.getPolicy)
 	r.Get("/internal/pocket/tasks/{taskId}/decisions", c.getDecisions)
+	r.Get("/internal/pocket/tasks/{taskId}/telemetry", c.getTelemetry)
 	r.Put("/internal/pocket/tasks/{taskId}/policy", c.configurePolicy)
 	r.Put("/internal/pocket/tasks/{taskId}/dependencies", c.setDependencies)
 	r.Patch("/internal/pocket/tasks/{taskId}", c.updateTask)

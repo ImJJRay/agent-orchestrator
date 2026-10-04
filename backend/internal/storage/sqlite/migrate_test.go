@@ -34,6 +34,7 @@ var expectedUsageTableColumns = map[string][]string{
 		// second full rebuild to move it beside billing_provider_id would cost
 		// more than the adjacency is worth.
 		"billing_provider_source",
+		"native_turn_id",
 	},
 }
 
@@ -92,6 +93,10 @@ func TestMigrateRollbackPreservesSessionInterfacePreference(t *testing.T) {
 
 func TestUsageTablesKeepOnlyDurableCollectionState(t *testing.T) {
 	db := openMigratedTestDB(t)
+	// The upstream fixture excludes Pocket's independent migration ledger.
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
 	for table, wantColumns := range expectedUsageTableColumns {
 		got := tableColumns(t, db, table)
 		if !reflect.DeepEqual(got, wantColumns) {

@@ -4,6 +4,72 @@ Updated: 2026-10-04
 
 This file records Pocket Agent project state only. Upstream product status remains in `docs/STATUS.md`.
 
+## Attempt telemetry — after PR #12
+
+Branch: `codex/pocket-attempt-telemetry`, based on `pocket-main` at
+`e48f0a67`. PR #12 was verified merged on 2026-10-04. The original telemetry
+commit `03e8ec112` was brought forward without the earlier audit branch.
+
+`ao pocket telemetry <task-id> [--after <attempt-number>] [--json]` reads up to
+100 attempts through the loopback-only daemon endpoint
+`GET /internal/pocket/tasks/{taskId}/telemetry`. The response includes attempt
+and retry identity, execution/validation states, completed duration, observed
+models, token counters and estimated USD cost in nanoUSD (1e9 = $1).
+`nextAfter` is the exclusive cursor for the following page.
+
+Codex root-rollout events require matching native turn, AO session, conversation
+branch and native root identities. Native turns are retained in normalized usage
+and the generation-fenced provider event archive. Only consistent per-request
+and cumulative counters acquire an attempt identity. Ambiguous matches, child
+rollouts, older archives without native identity and other harnesses remain
+unavailable; session totals and timestamps are never allocated to attempts.
+Replay may enrich an empty identity but rejects conflicting identities.
+
+Pocket migration 0172 adds the empty-by-default identity column. It belongs to
+`pocket_goose_db_version`; upstream migration 0172 and all shipped migrations
+remain unchanged. The integrated schema ends at upstream 174 / Pocket 172.
+
+`coverage=partial` means exactly matched events were observed, without claiming
+complete collection. `coverage=unavailable` means no attributable events.
+Missing counters and costs are JSON null and CLI unknown, distinct from observed
+zero. `costCoverage` describes pricing of matched events only. Costs use AO's
+existing normalized pricing estimates and provider provenance, not billed amounts.
+OpenCode/ACP, subagent allocation, JEV and routing are deferred.
+
+Validation on 2026-10-04, Go 1.27.1:
+
+- Windows and physical AYN Thor (native Android/ARM64): backend build and vet;
+  complete SQLite/storage, chat, CLI, Pocket and telemetry metadata suites pass.
+- Thor: complete usage collector, usage summary, telemetry reader and HTTP suites
+  pass, including router/spec contracts. The CLI suite excludes only the existing
+  desktop-release asset test `TestAssetName_PerOS`. Native CLI help was checked.
+- Regressions cover exact/ambiguous/wrong-branch/child attribution, replay and
+  identity enrichment/conflicts, retry lineage, pagination, JSON null vs known
+  zero, native-turn archival, loopback guards, and the two-ledger upgrade.
+- A read-only backup of the Thor database upgraded and reopened three times.
+  All 14 checked Pocket/usage table fingerprints were preserved: four tasks,
+  five attempts, 2,813 decisions, three actions and nine action events. Integrity
+  check passed at upstream 174 / Pocket 172. The usage tables were empty, so this
+  proves preservation/upgrade, not real provider-cost acceptance.
+- Native work used `~/.ao/pocket-telemetry-after12` and temporary databases.
+  The installed binary and live database were not changed; no daemon was started
+  against either the live database or its snapshot.
+- Pinned sqlc and API generation pass without drift. golangci-lint v2.13.2 reports
+  zero new issues against `pocket-main`; full Windows lint retains 47 platform/
+  baseline findings. Full Windows usage/controller suites have eight failing
+  top-level tests, all reproduced on unchanged `e48f0a67` (file identity,
+  continuation discovery, filesystem error, concurrent config rename, clone URL).
+- CI now includes race-enabled complete collector/summary suites and targeted
+  attribution/replay tests. Local Windows race and Linux container gates cannot
+  run without GCC/Docker. Native macOS and broader frontend/cloud jobs require
+  their CI environments; their previous integration evidence is recorded below.
+
+Review covered migration ownership, exact attribution, archive persistence,
+replay transactions, unknown pricing, API errors, pagination and loopback access.
+The migration fixture was corrected to apply both tracks before asserting the
+combined schema. No blocking findings remain from this review. Real billed
+provider acceptance and reliable attribution for other harnesses remain gaps.
+
 ## Upstream integration — 2026-10-04
 
 Integration branch: `integrate/upstream-2026-10-04`, merging upstream mirror

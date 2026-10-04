@@ -134,6 +134,7 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao pocket":                 {},
 	"ao pocket policy":          {},
 	"ao pocket decisions":       {},
+	"ao pocket telemetry":       {},
 	"ao cue":                    {},
 	"ao cue create":             {},
 	"ao cue list":               {},

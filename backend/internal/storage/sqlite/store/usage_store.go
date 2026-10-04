@@ -415,6 +415,12 @@ func (s *Store) ApplyUsageChunk(
 				if !matches {
 					return fmt.Errorf("%w: binding %d event %q", domain.ErrUsageSourceEventConflict, source.BindingID, ev.SourceEventKey)
 				}
+				if existing.NativeTurnID == "" && ev.NativeTurnID != "" {
+					if _, err := q.EnrichUsageEventNativeTurn(ctx, gen.EnrichUsageEventNativeTurnParams{NativeTurnID: ev.NativeTurnID, ID: existing.ID}); err != nil {
+						return err
+					}
+					insertedEvent = true
+				}
 				// A replaced transcript re-emits the same logical event under
 				// the same stable key, so this dedup hit can be a row still
 				// pointing at the retired generation. Repair skips that
@@ -892,6 +898,7 @@ func usageSourceInsertParams(rec domain.UsageSourceRecord) gen.InsertUsageSource
 
 func usageEventInsertParams(source gen.GetUsageSourceWithBindingAndSessionRow, ev domain.ModelUsageEvent) gen.InsertModelUsageEventParams {
 	return gen.InsertModelUsageEventParams{
+		NativeTurnID:          ev.NativeTurnID,
 		BindingID:             source.BindingID,
 		UsageSourceID:         source.SourceID,
 		ProviderID:            string(ev.ProviderID),
@@ -935,6 +942,7 @@ func (s *Store) HasOpenUsageAttribution(ctx context.Context, sourceID int64) (bo
 
 func usageEventReplayDisposition(existing gen.GetModelUsageEventByKeyRow, event domain.ModelUsageEvent) (matches, promoteAttribution bool) {
 	genericMatches := existing.ProviderID == string(event.ProviderID) && existing.ModelID == event.ModelID &&
+		(existing.NativeTurnID == "" || event.NativeTurnID == "" || existing.NativeTurnID == event.NativeTurnID) &&
 		existing.UsageMeasurementKind == string(event.MeasurementKind) &&
 		existing.InputTokens == ptrInt64ToNull(event.Tokens.InputTokens) &&
 		existing.CachedInputTokens == ptrInt64ToNull(event.Tokens.CachedInputTokens) &&
