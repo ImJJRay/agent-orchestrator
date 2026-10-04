@@ -116,6 +116,9 @@ VALUES (1, CURRENT_TIMESTAMP);`
 
 func TestPocketMigrationFreshDatabase(t *testing.T) {
 	db := openMigratedTestDB(t)
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
 	assertPocketIntegratedSchema(t, db)
 }
 

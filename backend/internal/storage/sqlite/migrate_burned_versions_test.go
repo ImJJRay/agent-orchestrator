@@ -172,9 +172,12 @@ var shippedMigrations = map[int64]string{
 	166: "0166_allow_deepseek_harness.sql",
 	167: "0167_allow_opencode_v2_harness.sql",
 	168: "0168_cues.sql",
-	169: "0169_pocket_execution_state.sql",
-	170: "0170_pocket_execution_lifecycle.sql",
-	171: "0171_pocket_orchestration.sql",
+	169: "0169_reported_pr_cdc.sql",
+	170: "0170_review_result_notifications.sql",
+	171: "0171_shell_preview_capability.sql",
+	172: "0172_client_task_requests.sql",
+	173: "0173_chat_client_payload_hash.sql",
+	174: "0174_conversation_account_cdc.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
@@ -201,7 +204,17 @@ func burnedVersion(v int64) bool {
 // produces silently-skipped migrations and unexplainable 500s months later
 // (issue #3475).
 func TestMigrationVersionLedger(t *testing.T) {
-	entries, err := migrationsFS.ReadDir("migrations")
+	assertMigrationVersionLedger(t, migrationsFS, shippedMigrations)
+	assertMigrationVersionLedger(t, pocketMigrationsFS, map[int64]string{
+		169: "0169_pocket_execution_state.sql",
+		170: "0170_pocket_execution_lifecycle.sql",
+		171: "0171_pocket_orchestration.sql",
+	})
+}
+
+func assertMigrationVersionLedger(t *testing.T, track migrationTrackFS, ledger map[int64]string) {
+	t.Helper()
+	entries, err := track.ReadDir("migrations")
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
@@ -230,7 +243,7 @@ func TestMigrationVersionLedger(t *testing.T) {
 				e.Name(), version)
 			continue
 		}
-		shipped, ok := shippedMigrations[version]
+		shipped, ok := ledger[version]
 		switch {
 		case ok && shipped != e.Name():
 			t.Errorf("migration version %d was renamed from %q to %q: installs that already applied it will never run the new file", version, shipped, e.Name())
@@ -240,7 +253,7 @@ func TestMigrationVersionLedger(t *testing.T) {
 		}
 	}
 
-	for version, name := range shippedMigrations {
+	for version, name := range ledger {
 		if _, ok := present[version]; !ok {
 			t.Errorf("ledgered migration %q (version %d) was deleted: installs that have not applied it yet will silently miss its schema, and the number is burned for reuse", name, version)
 		}
