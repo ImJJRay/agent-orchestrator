@@ -86,7 +86,7 @@ the full cloud race suite could not pass locally because
 `TestCheckpointBridgeRunsOnPoke` and `TestCheckpointBridgeSafetyNetFires` require
 Unix-socket calls rejected by this environment. Docker fresh-install and native
 Windows/macOS checks require CI; no local pass is claimed for those jobs.
-On-device Thor/provider execution remains unverified in this increment.
+Physical Thor acceptance was completed on 2026-09-30 against merged PR #9 using native Termux, isolated `AO_DATA_DIR=$HOME/.ao-pocket`, OpenCode v2 ACP (`opencode-v2`) and real `opencode/space-bunny-free` Chat workers. The deterministic orchestration path passed end to end: a durable B -> A dependency held B at zero attempts until explicit A completion; primary attempt 1 failed a branch-sensitive deterministic check and produced an automatic bounded `RETRY`; primary attempt 2 failed the same check and produced automatic `ESCALATE`; the explicitly configured second Chat worker ran attempt 3 on its separate escalation worktree/branch and passed; the task stopped at `NEEDS_USER / task_acceptance_required` rather than auto-accepting. Final accounting was 3 attempts, 1 retry and 1 escalation. After stopping and restarting AO against the same SQLite state, reconciliation retained the same latest execution/turn and action decision/execution/session identities, remained at 3 attempts and created no fourth attempt. The immutable audit contained the authorizing `READY -> RETRY -> ESCALATE` path. A non-blocking observability issue was also observed: active executions can generate many repeated `BLOCKED / execution_in_progress` decision snapshots, making history noisy without causing duplicate execution.
 
 
 ## Phase 0 custom delta
@@ -219,8 +219,7 @@ assumption. Android background-process survival and boot supervision are not
 claimed. TUI has no canonical semantic result source; `ao session result` remains
 Chat-only. There is no physical-device validation in this status update.
 
-Physical Thor/OpenCode/iPhone acceptance remains pending and must still be run when the
-device is available. Per the latest project decision, device acceptance no longer blocks
+Physical Thor native build, daemon/SQLite/Git/worktree, Connect Mobile local-boundary, OpenCode v2 ACP Chat, real worker execution, durable result, daemon restart, session restore/follow-up, and PR #9 deterministic-orchestration acceptance have now been exercised on-device. Optional TUI acceptance and the Tailscale/iPhone off-LAN acceptance path remain pending. Per the latest project decision, device acceptance no longer blocks
 independent backend/control-plane work. New implementation work starts from current
 `pocket-main` on a feature branch and returns through an unmerged PR; `main` and
 `quant-main` remain untouched.

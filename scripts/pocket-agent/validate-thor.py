@@ -80,13 +80,24 @@ def api(path, body=None, *, port=None, headers=None, secure_host=None):
             raw = response.read()
             return response.status, json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
-        return e.code, None
+        raw = e.read()
+        if not raw:
+            value = None
+        else:
+            try:
+                value = json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                value = raw.decode(errors='replace')
+        return e.code, value
 
 
 def must_api(path, body=None):
     code, value = api(path, body)
     if not 200 <= code < 300:
-        raise RuntimeError(f'{path}: HTTP {code}; inspect daemon.log')
+        detail = repr(value)
+        if len(detail) > 1500:
+            detail = detail[:1500]+'...'
+        raise RuntimeError(f'{path}: HTTP {code}; body={detail}; inspect daemon.log')
     return value
 
 
@@ -145,7 +156,7 @@ def worker(mode):
     filename = f'POCKET_{mode.upper()}_OK.txt'
     token = f'POCKET_{mode.upper()}_OK'
     prompt = f'In this worktree only, create {filename} containing exactly {token} followed by a newline. Do not commit, push, or touch any other files. Reply with exactly {token}.'
-    response = must_api('/api/v1/sessions', dict(projectId='thor-validation', harness='opencode',
+    response = must_api('/api/v1/sessions', dict(projectId='thor-validation', harness='opencode-v2',
                        mode=mode, kind='worker', model=args.chat, branch=branch,
                        displayName=f'Thor {mode} validation', prompt=prompt))
     sid = response['session']['id']
@@ -202,9 +213,12 @@ try:
     (repo/'README.md').write_text('Thor validation fixture\n')
     run(['git', 'add', 'README.md'], cwd=repo)
     run(['git', '-c', 'user.name=Thor Validation', '-c', 'user.email=thor@example.invalid', 'commit', '-m', 'fixture'], cwd=repo)
-    run(['git', 'remote', 'add', 'origin', 'https://github.com/ImJJRay/thor-validation-fixture.git'], cwd=repo)
-    cli('project', 'add', '--path', str(repo), '--id', 'thor-validation', '--worker-agent', 'opencode')
-    record(layer, 'PASS', 'private Git repository registered through AO API')
+    origin = data/'origin.git'
+    run(['git', 'init', '--bare', '-b', 'main', str(origin)])
+    run(['git', 'remote', 'add', 'origin', str(origin)], cwd=repo)
+    run(['git', 'push', '-u', 'origin', 'main'], cwd=repo)
+    cli('project', 'add', '--path', str(repo), '--id', 'thor-validation', '--worker-agent', 'opencode-v2')
+    record(layer, 'PASS', 'private Git repository with local bare origin registered through AO API')
     layer = 'WORKTREE'
     run(['git', 'worktree', 'add', '-b', 'validation/git', str(data/'git-worktree')], cwd=repo)
     (data/'git-worktree'/'probe.txt').write_text('isolated\n')
