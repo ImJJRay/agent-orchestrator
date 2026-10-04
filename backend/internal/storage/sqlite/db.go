@@ -30,7 +30,10 @@ import (
 type Store = sqlitestore.Store
 
 //go:embed migrations/*.sql
-var migrationsFS embed.FS
+var embeddedMigrationsFS embed.FS
+
+var migrationsFS = migrationTrackFS{}
+var pocketMigrationsFS = migrationTrackFS{pocket: true}
 
 // pragmas are applied on every connection open. WAL + NORMAL lets readers run
 // concurrently with the writer; busy_timeout absorbs brief writer contention;
@@ -277,6 +280,10 @@ func OpenPreMigrated(dataDir string) (*Store, error) {
 			got, want,
 		)
 	}
+	if err := verifyPocketMigrationVersion(writeDB); err != nil {
+		_ = writeDB.Close()
+		return nil, err
+	}
 
 	readDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -299,6 +306,9 @@ func migrate(db *sql.DB) error {
 	}
 	if err := repairPocketMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair Pocket migration history: %w", err)
+	}
+	if err := separatePocketMigrationHistory(db); err != nil {
+		return fmt.Errorf("separate Pocket migration history: %w", err)
 	}
 	if err := repairRenumberedAgentInstallJobsMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered agent-install-jobs migration history: %w", err)
@@ -364,6 +374,9 @@ func migrate(db *sql.DB) error {
 	if err := goose.Up(db, "migrations", goose.WithAllowMissing()); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
+	if err := migratePocket(db); err != nil {
+		return fmt.Errorf("run Pocket migrations: %w", err)
+	}
 	return reconcileSchema(db)
 }
 
@@ -377,6 +390,9 @@ func migrate(db *sql.DB) error {
 // Goose can then apply the real upstream migration instead of silently
 // skipping it. Healthy/repaired databases are no-ops on subsequent starts.
 func repairPocketMigrationHistory(db *sql.DB) error {
+	if exists, err := hasPocketMigrationLedger(db); err != nil || exists {
+		return err
+	}
 	var gooseTable int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'`).Scan(&gooseTable); err != nil {
 		return err

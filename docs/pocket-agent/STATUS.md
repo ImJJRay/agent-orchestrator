@@ -4,6 +4,65 @@ Updated: 2026-10-04
 
 This file records Pocket Agent project state only. Upstream product status remains in `docs/STATUS.md`.
 
+## Upstream integration — 2026-10-04
+
+Integration branch: `integrate/upstream-2026-10-04`, merging upstream mirror
+`main` at `086dd52ef` into `pocket-main` at `789983aeb`. PRs #10 and #11 are
+merged into that Pocket base. The execution/attempt telemetry increment remains
+separate from this integration.
+
+The integration preserves Pocket coordinator wiring, private API/CLI commands,
+secure mobile endpoints and the audit polling fix while taking the current
+upstream renderer and daemon interfaces.
+
+### Independent migration histories
+
+Upstream now uses versions 169–174, overlapping the already released Pocket
+169–171 migrations. Their SQL files stay unchanged. Migration discovery splits
+files containing `_pocket_` into `pocket_goose_db_version`; all other migrations
+continue to use upstream's `goose_db_version`. Future Pocket migrations must
+retain `_pocket_` in the filename and update the Pocket migration ledger test.
+Their version numbers advance within the Pocket track independently of upstream.
+
+Startup adopts complete existing Pocket schemas into the separate ledger in a
+transaction, removing shared version markers only when the corresponding
+upstream schema is absent. The previous 166/167 compatibility repair remains
+available before adoption. Partial Pocket schemas fail closed. Upstream runs
+first, then Pocket; reopening verifies both migration tracks. Task, attempt,
+policy and immutable audit rows are not rewritten by this repair.
+
+Local validation:
+
+- Windows and native Thor: backend build/vet; complete SQLite, Pocket, API
+  specification, chat and CLI package suites passed (Android CLI excludes the
+  existing desktop-release asset-name test).
+- Upgrade regressions cover shipped Pocket 169, 170 and 171, upstream-only 174,
+  repeated startup, incomplete schemas and retained immutable audit evidence.
+- A read-only backup of the Thor's real database was upgraded in isolation,
+  reopened three times and checked for SQLite integrity. Row fingerprints were
+  unchanged for all 11 Pocket data tables: four tasks, five attempts, 2,813
+  decisions, three actions and nine action events among the retained data.
+  The copied database finished at upstream 174 / Pocket 171. No daemon was
+  started against the copy; the live database and installed binary were untouched.
+- SQL and API artifacts were regenerated. The frontend source and generated API
+  contract match upstream `086dd52ef`.
+- Both frontend TypeScript checks, the docs production build, all 26 Cloud
+  client tests and 134 product UI tests passed. Both shared packages passed
+  their typechecks and packaging dry runs. Windows native CLI E2E passed.
+- The broader Windows HTTP/mobile suites retain filesystem URL, concurrent
+  rename and Unix permission failures. Thor HTTP/mobile passed; the upstream
+  shell-terminal tmux fixture fails because it hardcodes `/tmp` on Android.
+- The complete frontend suite was attempted on Windows: 357 files passed and
+  24 failed, including Unix socket/permission, macOS path, locale and timing
+  assumptions. This is not a frontend test pass; the unchanged upstream
+  frontend requires its Ubuntu CI gate.
+- Cloud's Unix process implementation cannot build on Windows. Race testing,
+  Linux container/CLI gates and native macOS helper compilation require CI:
+  this host has no GCC, Docker, Linux VM or macOS toolchain.
+- Full Windows lint reported 1,547 findings, dominated by 1,499 CRLF-sensitive
+  goimports diagnostics. The one new migration error-string finding was fixed;
+  remaining platform/baseline diagnostics require the Linux CI result.
+
 ## Audit polling stability — follow-up to Thor acceptance
 
 Branch: `fix/pocket-audit-stability`, based on `pocket-main` at `7ad91bc8d`.
