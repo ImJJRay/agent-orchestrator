@@ -75,6 +75,11 @@ jobs:
           go test -count=1 -timeout=5m -run '^TestPocket' ./internal/httpd/...
           go test -count=1 -timeout=5m -run '^TestPocket' ./internal/service/chat
 
+      - name: Test attempt telemetry collection and summaries
+        run: |
+          go test -race -count=1 -timeout=5m ./internal/observe/usage ./internal/service/usage ./internal/service/pockettelemetry
+          go test -race -count=1 -timeout=5m -run '^TestPocket(Telemetry|UsageNativeTurn)' ./internal/storage/sqlite/store
+
   # The suite above only ever runs on Linux, so the packages whose behaviour is
   # genuinely platform-specific have never been exercised on Windows: worktree
   # teardown renames and unlinks directories, and Windows is the platform where

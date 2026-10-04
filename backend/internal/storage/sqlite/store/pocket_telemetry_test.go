@@ -73,6 +73,17 @@ func TestPocketTelemetryExactAttributionAndReplay(t *testing.T) {
 	if page.Attempts[1].Execution.PriorExecutionID != page.Attempts[0].Execution.ID {
 		t.Fatal("retry lineage lost")
 	}
+	// Matching turn labels alone cannot substitute for root/branch ownership.
+	for _, root := range []string{"other-root", ""} {
+		_, err = raw.Exec("UPDATE conversation_branches SET provider_conversation_id=? WHERE conversation_id=?", root, f.convID)
+		mustNoError(t, err)
+		page = read()
+		if page.Attempts[0].Coverage != "unavailable" || page.Attempts[1].Coverage != "unavailable" {
+			t.Fatalf("wrong branch root %q: %+v", root, page)
+		}
+	}
+	_, err = raw.Exec("UPDATE conversation_branches SET provider_conversation_id='root-thread' WHERE conversation_id=?", f.convID)
+	mustNoError(t, err)
 	// One raw identity mapping to two attempts must never charge either one.
 	_, err = raw.Exec("INSERT INTO conversation_provider_events(conversation_id,session_id,method,payload_json,received_at) VALUES (?,?,'turn.started',?,?)", f.convID, f.session.ID, `{"providerTurnId":"scoped-turn-2","nativeTurnId":"native-1"}`, now)
 	mustNoError(t, err)
