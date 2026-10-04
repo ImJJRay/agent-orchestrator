@@ -352,7 +352,7 @@ SELECT
     event.billing_provider_source, event.model_id, event.usage_measurement_kind,
     event.input_tokens, event.cached_input_tokens,
     event.uncached_input_tokens, event.output_tokens,
-    event.provider_usage_json, event.created_at
+    event.provider_usage_json, event.created_at, event.native_turn_id
 FROM model_usage_events event
 WHERE event.binding_id = ? AND event.source_event_key = ?;
 
@@ -364,9 +364,12 @@ INSERT INTO model_usage_events (
     provider_usage_json,
     input_cost_nanos, cached_input_cost_nanos, output_cost_nanos,
     estimated_cost_nanos, pricing_version,
-    source_event_key, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    source_event_key, created_at, native_turn_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
+
+-- name: EnrichUsageEventNativeTurn :execrows
+UPDATE model_usage_events SET native_turn_id = ? WHERE id = ? AND native_turn_id = '';
 
 -- name: RehomeOpenUsageEventToReplacementSource :execrows
 -- A physically replaced transcript re-emits the same logical event under the
@@ -642,3 +645,66 @@ LEFT JOIN usage_session_integrity integrity ON integrity.session_id = ub.session
 WHERE (sqlc.arg(project_id) = '' OR s.project_id = sqlc.arg(project_id))
 GROUP BY ub.session_id, s.project_id, s.num, integrity.incomplete
 ORDER BY s.project_id, s.num;
+
+-- name: AggregateUsageByPocketExecution :many
+SELECT
+    ub.harness,
+    mue.model_id,
+    CAST(COUNT(*) AS INTEGER) AS event_count,
+    CAST(COALESCE(SUM(mue.input_tokens), 0) AS INTEGER) AS input_tokens,
+    CAST(COUNT(mue.input_tokens) AS INTEGER) AS known_input_token_count,
+    CAST(COALESCE(SUM(mue.cached_input_tokens), 0) AS INTEGER) AS cached_input_tokens,
+    CAST(COUNT(mue.cached_input_tokens) AS INTEGER) AS known_cached_input_token_count,
+    CAST(COALESCE(SUM(mue.uncached_input_tokens), 0) AS INTEGER) AS uncached_input_tokens,
+    CAST(COUNT(mue.uncached_input_tokens) AS INTEGER) AS known_uncached_input_token_count,
+    CAST(COALESCE(SUM(mue.output_tokens), 0) AS INTEGER) AS output_tokens,
+    CAST(COUNT(mue.output_tokens) AS INTEGER) AS known_output_token_count,
+    CAST(COUNT(mue.estimated_cost_nanos) AS INTEGER) AS priced_event_count,
+    CAST(COALESCE(SUM(mue.estimated_cost_nanos), 0) AS INTEGER) AS priced_total_nanos,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'observed' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS observed_cost_event_count,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'inferred' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS inferred_cost_event_count,
+    CAST(COUNT(mue.input_cost_nanos) AS INTEGER) AS known_input_count,
+    CAST(COALESCE(SUM(mue.input_cost_nanos), 0) AS INTEGER) AS known_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_input_nanos,
+    CAST(COUNT(mue.cached_input_cost_nanos) AS INTEGER) AS known_cached_input_count,
+    CAST(COALESCE(SUM(mue.cached_input_cost_nanos), 0) AS INTEGER) AS known_cached_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.cached_input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_cached_input_nanos,
+    CAST(COUNT(mue.output_cost_nanos) AS INTEGER) AS known_output_count,
+    CAST(COALESCE(SUM(mue.output_cost_nanos), 0) AS INTEGER) AS known_output_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.output_cost_nanos END), 0) AS INTEGER) AS unpriced_known_output_nanos
+FROM model_usage_events mue
+JOIN usage_bindings ub ON ub.id = mue.binding_id
+JOIN usage_sources us ON us.id = mue.usage_source_id AND us.binding_id = ub.id
+WHERE ub.session_id = (SELECT target.session_id FROM pocket_executions target WHERE target.id = sqlc.arg(execution_id))
+  AND ub.harness = 'codex' AND mue.native_turn_id <> ''
+  AND us.native_session_id = ub.native_root_id
+  AND lower(trim(mue.model_id)) <> '<synthetic>'
+  AND (
+    SELECT CASE WHEN COUNT(DISTINCT pe.id) = 1 THEN MIN(pe.id) ELSE '' END
+    FROM pocket_executions pe
+    JOIN conversation_turns ct ON ct.id = pe.turn_id
+      AND ct.conversation_id = pe.conversation_id AND ct.handled_by_session_id = pe.session_id
+    JOIN conversation_branches cb ON cb.id = ct.branch_id
+      AND cb.conversation_id = ct.conversation_id
+    WHERE pe.session_id = ub.session_id AND cb.provider_conversation_id = ub.native_root_id
+      AND ct.provider_turn_id <> ''
+      AND EXISTS (
+        SELECT 1 FROM conversation_provider_events ev
+        WHERE ev.conversation_id = ct.conversation_id AND ev.branch_id = ct.branch_id
+          AND ev.session_id = pe.session_id
+          AND json_extract(ev.payload_json, '$.providerTurnId') = ct.provider_turn_id
+          AND json_extract(ev.payload_json, '$.nativeTurnId') = mue.native_turn_id
+      )
+  ) = sqlc.arg(execution_id)
+-- Grouped by model alone. The billing provider is a pricing input, not a
+-- product distinction: each event was already costed against its own provider's
+-- rates, so summing across them is exact. Splitting on it only ever surfaced
+-- AO's own attribution gaps as duplicate rows for one model.
+GROUP BY ub.harness, mue.model_id
+ORDER BY SUM(mue.input_tokens + mue.output_tokens) DESC, ub.harness, mue.model_id;

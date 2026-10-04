@@ -209,6 +209,7 @@ func TestMigrationVersionLedger(t *testing.T) {
 		169: "0169_pocket_execution_state.sql",
 		170: "0170_pocket_execution_lifecycle.sql",
 		171: "0171_pocket_orchestration.sql",
+		172: "0172_pocket_usage_turn_identity.sql",
 	})
 }
 

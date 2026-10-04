@@ -414,6 +414,7 @@ type ModelUsageEvent struct {
 	EstimatedCostNanos    sql.NullInt64
 	PricingVersion        string
 	BillingProviderSource sql.NullString
+	NativeTurnID          string
 }
 
 type Notification struct {

@@ -4,6 +4,69 @@ Updated: 2026-10-04
 
 This file records Pocket Agent project state only. Upstream product status remains in `docs/STATUS.md`.
 
+## Attempt telemetry — local implementation
+
+Branch: `feat/pocket-attempt-telemetry`, stacked on the reviewed audit stability
+fix. This entry does not imply either branch has been published or merged.
+
+`ao pocket telemetry <task-id> [--after <attempt-number>] [--json]` reads up to
+100 attempts through the loopback-only daemon endpoint
+`GET /internal/pocket/tasks/{taskId}/telemetry`. The response includes durable
+attempt/retry identity, execution and validation states, completed duration,
+observed models, token counters and estimated USD cost in nanoUSD (1e9 = $1).
+`nextAfter` is the exclusive cursor for the following page.
+
+The first collector attributes Codex root-rollout events by explicit native
+turn identity, AO session, conversation branch and native root. It retains the
+native turn in both normalized usage and the generation-fenced provider event
+archive. Only events with consistent per-request and cumulative counters can
+acquire an attempt identity. Multiple possible attempts, subagent rollouts,
+legacy archives without native identity and other harnesses remain unavailable;
+there is no timestamp inference or allocation of session-wide totals.
+
+The Codex turn-context field is defined in the
+[upstream protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs).
+Parser checkpoints retain it across chunks and clear it at turn boundaries.
+Migration 0172 adds an empty-by-default identity column. Replay can enrich a
+previously empty identity but cannot silently replace a conflicting one.
+
+`coverage=partial` means exactly matched events have been observed; it does not
+claim complete collection. `coverage=unavailable` means no attributable events.
+Missing counters and costs are JSON null, never fabricated zero. `costCoverage`
+describes pricing coverage of the matched events only, independently of overall
+usage coverage. Cost uses AO's existing normalized pricing estimates and billing
+provider provenance; it is not an invoice or provider-reported billed amount.
+OpenCode/ACP remains unavailable until its reports have reliable turn ownership.
+Existing session-scoped usage and routing behavior are unchanged.
+
+Native validation uses `~/.ao/pocket-telemetry-check` on the authorized Thor,
+with temporary test databases. No installed binary or live AO data is replaced.
+
+Validation on 2026-10-04 (Go 1.27.1):
+
+- Windows and native Thor: backend build/vet, new parser/attribution/replay,
+  pagination, loopback guard, API and CLI regressions passed.
+- Complete storage/migration, Chat controller and HTTP router/spec suites passed
+  on Thor; complete usage parser and usage service suites passed there too.
+  The complete native CLI suite passed with only `TestAssetName_PerOS` skipped:
+  that pre-existing test expects a release asset for Android and also fails on
+  the unchanged base. The new native binary's telemetry help was inspected.
+- Windows complete storage/migration, Chat and CLI suites passed. Broader usage
+  and HTTP controller suites still have platform failures; each failing test
+  was reproduced on the audit-fix base. These include CRLF pricing hash data,
+  file identity/continuation handling, filesystem errors, clone URL handling
+  and concurrent mobile-config rename failures. No Windows full-suite pass is
+  claimed.
+- Race checks require CGO/GCC unavailable on this laptop. Linux/macOS CI, Docker
+  jobs and live billed-provider acceptance were not run. Remote CI remains
+  pending publication; the native isolated tests do not claim production rollout.
+- Pinned golangci-lint v2.13.2 passed with zero new issues across all affected
+  packages against the audit-fix base. The initial whole-backend lint attempt
+  timed out; no full-lint pass is claimed.
+
+Next: gather live attempt evidence with these coverage rules before implementing
+JEV or cache-aware routing decisions.
+
 ## Upstream integration — 2026-10-04
 
 Integration branch: `integrate/upstream-2026-10-04`, merging upstream mirror

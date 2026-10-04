@@ -201,6 +201,9 @@ type UsageEventCosts struct {
 // verbatim so optional and future provider fields survive. It is empty when the
 // event predates the capture or the object exceeded its size bound.
 type ModelUsageEvent struct {
+	// NativeTurnID is an explicit native identity, never inferred from timestamps.
+	// Empty means this event is not attributable to an individual attempt.
+	NativeTurnID          string
 	ProviderID            UsageProviderID
 	BillingProviderID     string
 	BillingProviderSource UsageBillingProviderSource
