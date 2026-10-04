@@ -2,12 +2,122 @@ package store_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
+
+func TestPocketLifecycleUnchangedPollsPreserveAudit(t *testing.T) {
+	for _, state := range []domain.TurnState{domain.TurnStateQueued, domain.TurnStateRunning, domain.TurnStateCompleted} {
+		for _, missingWorkspace := range []bool{false, true} {
+			name := string(state) + "/bound"
+			if missingWorkspace {
+				name = string(state) + "/awaiting-workspace"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx := context.Background()
+				dataDir := t.TempDir()
+				s, err := sqlite.Open(dataDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = s.Close() }()
+				fixture := seedPocketFixture(t, s)
+				rec, ok, err := s.GetSession(ctx, fixture.session.ID)
+				if err != nil || !ok {
+					t.Fatalf("get session: ok=%v err=%v", ok, err)
+				}
+				if missingWorkspace {
+					rec.Metadata.WorkspacePath = ""
+					rec.Metadata.WorkspaceRepoPath = ""
+					if err := s.UpdateSession(ctx, rec); err != nil {
+						t.Fatal(err)
+					}
+				}
+				now := time.Now().UTC()
+				if state != domain.TurnStateQueued {
+					if err := s.BindTurnToProvider(ctx, fixture.turn2, "audit-turn", now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if state == domain.TurnStateCompleted {
+					if err := s.SettleTurnByID(ctx, fixture.turn2, state, "", now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				reconcile := func() domain.PocketPolicyView {
+					t.Helper()
+					now = now.Add(time.Second)
+					if err := s.ReconcilePocketExecutionLifecycle(ctx, now); err != nil {
+						t.Fatal(err)
+					}
+					if err := s.ReconcilePocketPolicy(ctx, now); err != nil {
+						t.Fatal(err)
+					}
+					snapshot, ok, err := s.PocketExecutionForSession(ctx, fixture.session.ID, fixture.turn2)
+					if err != nil || !ok {
+						t.Fatalf("execution snapshot: ok=%v err=%v", ok, err)
+					}
+					return policyView(t, s, snapshot.Task.ID)
+				}
+				before := reconcile()
+				assertStable := func() {
+					t.Helper()
+					for range 3 {
+						after := reconcile()
+						if !reflect.DeepEqual(before, after) {
+							t.Fatalf("unchanged poll changed execution/policy/audit: decisions %d -> %d, updatedAt %v -> %v",
+								len(before.Decisions), len(after.Decisions), before.Facts.Latest.UpdatedAt, after.Facts.Latest.UpdatedAt)
+						}
+					}
+				}
+				assertStable()
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s, err = sqlite.Open(dataDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertStable()
+
+				// Late AO facts must still produce a new immutable audit snapshot.
+				if missingWorkspace {
+					rec.Metadata.WorkspacePath = "/late/worktree"
+					rec.Metadata.WorkspaceRepoPath = "/late/repo"
+					if err := s.UpdateSession(ctx, rec); err != nil {
+						t.Fatal(err)
+					}
+					after := reconcile()
+					if len(after.Decisions) != len(before.Decisions)+1 ||
+						after.Facts.Latest.WorkspacePath != "/late/worktree" ||
+						after.Facts.Latest.WorkspaceRepoPath != "/late/repo" ||
+						!after.Facts.Latest.UpdatedAt.After(before.Facts.Latest.UpdatedAt) {
+						t.Fatalf("late workspace facts not recorded: %#v", after.Facts.Latest)
+					}
+					before = after
+					assertStable()
+				}
+				if state != domain.TurnStateCompleted {
+					if err := s.SettleTurnByID(ctx, fixture.turn2, domain.TurnStateCompleted, "", now); err != nil {
+						t.Fatal(err)
+					}
+					after := reconcile()
+					if len(after.Decisions) != len(before.Decisions)+1 ||
+						after.Facts.Latest.State != domain.PocketExecutionCompleted ||
+						after.Facts.Latest.CompletedAt == nil {
+						t.Fatalf("completion not recorded: %#v", after.Facts.Latest)
+					}
+					before = after
+					assertStable()
+				}
+			})
+		}
+	}
+}
 
 func TestPocketLifecycleProjectsAOTurnsAndRetryLineage(t *testing.T) {
 	ctx := context.Background()
